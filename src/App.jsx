@@ -164,6 +164,8 @@ const App = () => {
                 if (data.physicalMap) setPhysicalMap(data.physicalMap);
                 if (data.config) setConfig(data.config);
                 if (data.lastResult) setLastApiStepResult(data.lastResult);
+                if (data.currentStep !== undefined) setCurrentStep(data.currentStep);
+                if (data.totalEnergyConsumed !== undefined) setTotalEnergyConsumed(data.totalEnergyConsumed);
 
                 // Update radius if physical map changed
                 if (data.physicalMap && data.physicalMap.levels) {
@@ -173,7 +175,7 @@ const App = () => {
         } catch (err) {
             remoteLog(`[API] Sync failed: ${err.message}`, 'error');
         }
-    }, [setConfig]);
+    }, [setConfig, setCurrentStep, setTotalEnergyConsumed]);
 
     useEffect(() => {
         let interval;

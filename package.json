@@ -10,9 +10,10 @@
         "preview": "vite preview",
         "backend": "node server.js",
         "dev:backend": "nodemon server.js",
-        "dev:full": "concurrently \"npm run dev -- --host --port 40000\" \"npm run dev:backend\""
+        "dev:full": "concurrently \"npm run dev -- --host --port 40000\" \"npm run dev:backend\" \"node mcp-server.js\""
     },
     "dependencies": {
+        "@modelcontextprotocol/sdk": "^0.6.1",
         "@react-three/drei": "^9.88.0",
         "@react-three/fiber": "^8.15.11",
         "body-parser": "^1.20.2",

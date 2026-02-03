@@ -256,6 +256,7 @@ app.post('/api/generate', (req, res) => {
     const fullState = {
         ...result,
         totalEnergyConsumed: 0,
+        currentStep: 0,
         lastResult: null
     };
 
@@ -493,8 +494,8 @@ app.get('/api/player/get-state', (req, res) => {
             const playerView = {
                 worldState: data.worldState,
                 config: data.config,
-                currentStep: data.currentStep,
-                totalEnergyConsumed: data.totalEnergyConsumed,
+                currentStep: data.currentStep ?? 0,
+                totalEnergyConsumed: data.totalEnergyConsumed ?? 0,
                 lastResult: data.lastResult
             };
             res.json(playerView);
@@ -545,6 +546,7 @@ app.post('/api/restart', (req, res) => {
         physicalMap,
         config: savedConfig || currentConfig,
         totalEnergyConsumed: 0,
+        currentStep: 0,
         mapRadius: savedState.mapRadius,
         lastResult: null
     };

@@ -4,6 +4,7 @@ services:
     ports:
       - "40000:40000"
       - "40001:40001"
+      - "40002:40002"
     volumes:
       - .:/app
       - /app/node_modules
@@ -14,3 +15,20 @@ services:
       - NODE_OPTIONS=--no-warnings
     stdin_open: true
     tty: true
+    networks:
+      - game-of-cells-network
+
+  n8n:
+    image: n8nio/n8n
+    ports:
+      - "5678:5678"
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+    networks:
+      - game-of-cells-network
+    environment:
+      - N8N_SECURE_COOKIE=false
+
+networks:
+  game-of-cells-network:
+    driver: bridge
