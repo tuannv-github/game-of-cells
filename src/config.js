@@ -14,7 +14,7 @@ export const DEFAULT_CONFIG = {
     LEVEL_DISTANCE: 20.0,
     PORTAL_PAIR_COUNT: 3,
     PORTAL_AREA: 300,
-    TOTAL_OBSTACLE_AREA_PER_LEVEL: 40,
+    TOTAL_OBSTACLE_AREA_PER_LEVEL: 70,
     LAYER_OFFSETS: {
         background: {
             offset: -0.1,

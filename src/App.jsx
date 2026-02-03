@@ -100,7 +100,7 @@ const App = () => {
     }, [currentStep]);
 
     useEffect(() => {
-        localStorage.setItem('goc_totalEnergyConsumed', totalEnergyConsumed.toString());
+        localStorage.setItem('goc_totalEnergyConsumed', (totalEnergyConsumed || 0).toString());
     }, [totalEnergyConsumed]);
 
     useEffect(() => {
@@ -437,28 +437,30 @@ const App = () => {
                 if (data.worldState) {
                     setWorldState(data.worldState);
                     if (data.currentStep !== undefined) setCurrentStep(data.currentStep);
+                    setTotalEnergyConsumed(data.totalEnergyConsumed);
 
-                    if (data.result === 'success') {
-                        setTotalEnergyConsumed(data.totalEnergyConsumed);
-                        const energyInfo = `Energy: ${data.energyConsumed.toFixed(1)} (Total: ${data.totalEnergyConsumed.toFixed(1)}/${config.TOTAL_ENERGY}, Left: ${data.energyLeft.toFixed(1)})`;
+                    if (data.gameOver) {
+                        setStatus(`GAME OVER: ${data.msg}`);
+                        setLastApiStepResult({
+                            msg: data.msg,
+                            failure: data.msg,
+                            cellsShouldBeOn: data.cellsShouldBeOn || [],
+                            energyConsumed: data.energyConsumed,
+                            totalEnergyConsumed: data.totalEnergyConsumed,
+                            energyLeft: data.energyLeft
+                        });
+                        remoteLog(`[API] Step ${data.currentStep} Failed: ${data.msg}`, 'error');
+                    } else {
+                        const energyInfo = `Energy: ${(data.energyConsumed || 0).toFixed(1)} (Total: ${(data.totalEnergyConsumed || 0).toFixed(1)}/${config.TOTAL_ENERGY}, Left: ${(data.energyLeft || 0).toFixed(1)})`;
                         const stepMsg = `Step ${data.currentStep} Success - ${energyInfo}`;
                         setStatus(stepMsg);
                         setLastApiStepResult({
-                            result: data.result,
                             msg: data.msg,
                             energyConsumed: data.energyConsumed,
                             totalEnergyConsumed: data.totalEnergyConsumed,
                             energyLeft: data.energyLeft
                         });
                         remoteLog(`[API] ${stepMsg}`);
-                    } else {
-                        setStatus(`GAME OVER: ${data.msg}`);
-                        setLastApiStepResult({
-                            result: data.result,
-                            msg: data.msg,
-                            cellsShouldBeOn: data.cellsShouldBeOn || []
-                        });
-                        remoteLog(`[API] Step ${data.currentStep} Failed: ${data.msg}`, 'error');
                     }
                 }
             } catch (err) {
@@ -487,7 +489,7 @@ const App = () => {
             });
             const data = await response.json();
 
-            if (data.result === 'success') {
+            if (data.worldState) {
                 setWorldState(data.worldState);
                 setPhysicalMap(data.physicalMap);
                 setMapRadius(data.mapRadius);
@@ -511,9 +513,9 @@ const App = () => {
             });
             const data = await response.json();
 
-            if (data.result === 'success') {
+            if (data.worldState) {
                 setWorldState(data.worldState);
-                setPhysicalMap(data.physicalMap);
+                if (data.physicalMap) setPhysicalMap(data.physicalMap);
                 setCurrentStep(data.currentStep);
                 setTotalEnergyConsumed(data.totalEnergyConsumed);
                 setStatus(`Undone to Step ${data.currentStep}`);
@@ -586,7 +588,7 @@ const App = () => {
                         {worldState.levels.map((level, lIndex) => {
                             const baseY = lIndex * config.LEVEL_DISTANCE;
 
-                            const isGameOver = lastApiStepResult?.result === 'failure';
+                            const isGameOver = !!lastApiStepResult?.failure;
 
                             return (
                                 <group key={level.id}>

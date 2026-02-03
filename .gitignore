@@ -1,3 +1,4 @@
 node_modules/
 logs
 scenarios/
+!scenarios/map_autosave_initial.json

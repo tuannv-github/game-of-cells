@@ -32,6 +32,7 @@ let currentConfig = { ...DEFAULT_CONFIG };
 let isGameOver = false;
 let currentStep = 0;
 let lastCellsShouldBeOn = [];
+let lastGameOverMsg = '';
 let stateHistory = []; // Store previous states for undo functionality
 
 // Server-side state management
@@ -239,6 +240,7 @@ app.post('/api/generate', (req, res) => {
     });
     isGameOver = false;
     currentStep = 0;
+    lastGameOverMsg = '';
     stateHistory = []; // Clear history on new generation
 
     // Initialize server state
@@ -291,9 +293,6 @@ app.post('/api/generate', (req, res) => {
  *             schema:
  *               type: object
  *               properties:
- *                 result:
- *                   type: string
- *                   example: "success"
  *                 msg:
  *                   type: string
  *                   example: "Step completed successfully"
@@ -302,12 +301,16 @@ app.post('/api/generate', (req, res) => {
  *                   example: 1
  *                 worldState:
  *                   type: object
+
  *                 energyConsumed:
  *                   type: number
  *                 totalEnergyConsumed:
  *                   type: number
  *                 energyLeft:
  *                   type: number
+ *                 gameOver:
+ *                   type: boolean
+ *                   description: True if the game has ended (due to failure or completion)
  */
 app.post('/api/player/step', (req, res) => {
     // Consistency check: ensure server state is loaded (useful if server restarted)
@@ -320,9 +323,9 @@ app.post('/api/player/step', (req, res) => {
                 serverPhysicalMap = savedState.physicalMap;
                 serverTotalEnergyConsumed = savedState.totalEnergyConsumed || 0;
                 currentStep = savedState.currentStep || 0;
-                // Also check if the last result was a failure to restore isGameOver
-                if (savedState.lastResult && savedState.lastResult.result === 'failure') {
+                if (savedState.lastResult && (savedState.lastResult.gameOver || savedState.lastResult.failure)) {
                     isGameOver = true;
+                    lastGameOverMsg = savedState.lastResult.msg || 'Game over';
                 }
                 writeToLogFile('[RECOVERY] Server state recovered from intermediate autosave', 'info');
             } catch (e) {
@@ -334,8 +337,7 @@ app.post('/api/player/step', (req, res) => {
     // Check if game is already over
     if (isGameOver) {
         return res.json({
-            result: 'failure',
-            msg: 'Game over',
+            msg: lastGameOverMsg || 'Game over',
             worldState: serverWorldState,
             gameOver: true,
             currentStep
@@ -361,7 +363,6 @@ app.post('/api/player/step', (req, res) => {
     // Final safety check: if still no state, we can't proceed
     if (!serverWorldState) {
         return res.status(400).json({
-            result: 'failure',
             msg: 'No active simulation state found. Please generate a world first.'
         });
     }
@@ -396,16 +397,17 @@ app.post('/api/player/step', (req, res) => {
     const newTotalEnergyConsumed = serverTotalEnergyConsumed + energyConsumed;
     const energyLeft = currentConfig.TOTAL_ENERGY - newTotalEnergyConsumed;
 
-    // Determine result and message
-    let result, msg;
+    // Determine message and failure state
+    let msg;
+    let logicalFailure = false;
+
     if (failure) {
-        result = 'failure';
+        logicalFailure = true;
         msg = failure;
     } else if (energyLeft <= 0) {
-        result = 'failure';
-        msg = 'Game over: Out of energy';
+        logicalFailure = true;
+        msg = 'Out of energy';
     } else {
-        result = 'success';
         msg = 'Step completed successfully';
     }
 
@@ -416,12 +418,6 @@ app.post('/api/player/step', (req, res) => {
                 if (cellsShouldBeOn.includes(cell.id)) {
                     cell.shouldBeOn = true;
                 } else {
-                    // Ensure we don't leave stale flags if logic changes, 
-                    // though for game over simple set is enough.
-                    // But strictly speaking, we are mutating newLevels structure here.
-                    // Since newLevels was deep-mapped above, this is safe.
-                    // We might want to clear it if it existed? 
-                    // The user implied "after game over", so marking it here is good.
                     cell.shouldBeOn = false;
                 }
             });
@@ -431,25 +427,24 @@ app.post('/api/player/step', (req, res) => {
     currentStep++;
 
     const responseData = {
-        result,
         msg,
         worldState: { levels: newLevels, minions: minionStates },
-        gameOver: result === 'failure',
-        uncoveredMinions: result === 'failure' ? uncoveredMinions : undefined,
-        currentStep
+        gameOver: logicalFailure,
+        uncoveredMinions: logicalFailure ? uncoveredMinions : undefined,
+        currentStep,
+        cellsShouldBeOn: logicalFailure ? cellsShouldBeOn : undefined
     };
 
     // Set game over flag
-    if (result === 'failure') {
+    if (logicalFailure) {
         isGameOver = true;
+        lastGameOverMsg = msg;
     }
 
-    // Include energy info only on success
-    if (result === 'success') {
-        responseData.energyConsumed = energyConsumed;
-        responseData.totalEnergyConsumed = newTotalEnergyConsumed;
-        responseData.energyLeft = energyLeft;
-    }
+    // Include energy info always
+    responseData.energyConsumed = energyConsumed;
+    responseData.totalEnergyConsumed = newTotalEnergyConsumed;
+    responseData.energyLeft = energyLeft;
 
     // Save step result to intermediate file
     const intermediateSavePath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
@@ -460,12 +455,13 @@ app.post('/api/player/step', (req, res) => {
         totalEnergyConsumed: newTotalEnergyConsumed,
         currentStep: currentStep,
         lastResult: {
-            result,
             msg,
+            failure: logicalFailure ? msg : undefined,
             energyConsumed,
             totalEnergyConsumed: newTotalEnergyConsumed,
             energyLeft,
-            uncoveredMinions: result === 'failure' ? uncoveredMinions : undefined
+            uncoveredMinions: logicalFailure ? uncoveredMinions : undefined,
+            gameOver: logicalFailure
         }
     };
     fs.writeFileSync(intermediateSavePath, JSON.stringify(fullState, null, 2));
@@ -524,6 +520,7 @@ app.get('/api/player/get-state', (req, res) => {
 app.post('/api/restart', (req, res) => {
     isGameOver = false;
     currentStep = 0;
+    lastGameOverMsg = '';
     stateHistory = []; // Clear history on restart
 
     // Read the initial save (created at generation)
@@ -559,7 +556,6 @@ app.post('/api/restart', (req, res) => {
     serverTotalEnergyConsumed = 0;
 
     res.json({
-        result: 'success',
         msg: 'Game restarted with current map',
         worldState,
         physicalMap,
@@ -583,7 +579,6 @@ app.post('/api/restart', (req, res) => {
 app.post('/api/undo', (req, res) => {
     if (stateHistory.length === 0) {
         return res.status(400).json({
-            result: 'failure',
             msg: 'No previous state to undo to'
         });
     }
@@ -594,6 +589,7 @@ app.post('/api/undo', (req, res) => {
     // Restore the state
     isGameOver = previousState.isGameOver;
     currentStep = previousState.currentStep;
+    lastGameOverMsg = isGameOver ? (previousState.lastResult?.msg || '') : '';
 
     const { worldState, physicalMap, totalEnergyConsumed } = previousState;
 
@@ -617,7 +613,6 @@ app.post('/api/undo', (req, res) => {
     writeToLogFile(`[UNDO] Restored to step ${currentStep}`, 'info');
 
     res.json({
-        result: 'success',
         msg: `Undone to step ${currentStep}`,
         worldState,
         physicalMap,
@@ -625,6 +620,7 @@ app.post('/api/undo', (req, res) => {
         currentStep
     });
 });
+
 
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);

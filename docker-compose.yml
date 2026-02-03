@@ -1,5 +1,5 @@
 services:
-  app:
+  game-of-cells:
     build: .
     ports:
       - "40000:40000"
