@@ -18,12 +18,12 @@ const Minion = ({ position, type, color, label, size = 1.0, isUncovered = false 
             const mat = meshRef.current.material;
             if (mat) {
                 if (isUncovered) {
-                    const t = state.clock.elapsedTime * Math.PI * 2; // 1 blink per second
+                    const t = state.clock.elapsedTime * Math.PI * 2; // 1Hz blink (1 per second)
                     const isRed = Math.sin(t) > 0;
-                    const blinkColor = isRed ? '#ff0000' : '#000000';
+                    const blinkColor = isRed ? '#ff0000' : color;
                     mat.color.set(blinkColor);
                     mat.emissive.set(blinkColor);
-                    mat.emissiveIntensity = 2.0;
+                    mat.emissiveIntensity = isRed ? 3.0 : 1.0;
                 } else {
                     // Reset to normal properties
                     mat.color.set(color);

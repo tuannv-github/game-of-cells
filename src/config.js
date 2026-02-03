@@ -14,7 +14,7 @@ export const DEFAULT_CONFIG = {
     LEVEL_DISTANCE: 20.0,
     PORTAL_PAIR_COUNT: 3,
     PORTAL_AREA: 300,
-    TOTAL_OBSTACLE_AREA_PER_LEVEL: 70,
+    TOTAL_OBSTACLE_AREA_PER_LEVEL: 40,
     LAYER_OFFSETS: {
         background: {
             offset: -0.1,
@@ -44,7 +44,7 @@ export const DEFAULT_CONFIG = {
     HUMAN: {
         ENABLED: true,
         COUNT: 5,
-        MAX_MOVE: 1.5,
+        MAX_MOVE: 6.0,
         REQ_THROUGHPUT: 5,
         COLOR: '#ffffff',
         SIZE: 2.5
@@ -52,7 +52,7 @@ export const DEFAULT_CONFIG = {
     HUMANOID: {
         ENABLED: true,
         COUNT: 3,
-        MAX_MOVE: 2.0,
+        MAX_MOVE: 8.0,
         REQ_THROUGHPUT: 10,
         COLOR: '#ffcc00',
         SIZE: 2.5
@@ -60,7 +60,7 @@ export const DEFAULT_CONFIG = {
     DOG_ROBOT: {
         ENABLED: true,
         COUNT: 2,
-        MAX_MOVE: 5.0,
+        MAX_MOVE: 20.0,
         REQ_THROUGHPUT: 15,
         COLOR: '#3366ff',
         SIZE: 2.5
@@ -68,7 +68,7 @@ export const DEFAULT_CONFIG = {
     TURTLE_BOT: {
         ENABLED: true,
         COUNT: 2,
-        MAX_MOVE: 1.0,
+        MAX_MOVE: 4.0,
         REQ_THROUGHPUT: 2,
         COLOR: '#00ff66',
         SIZE: 2.5
@@ -76,7 +76,7 @@ export const DEFAULT_CONFIG = {
     DRONE: {
         ENABLED: true,
         COUNT: 1,
-        MAX_MOVE: 10.0,
+        MAX_MOVE: 40.0,
         REQ_THROUGHPUT: 20,
         COLOR: '#9933ff',
         SIZE: 2.5

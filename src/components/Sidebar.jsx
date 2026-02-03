@@ -220,7 +220,14 @@ const Sidebar = ({
                                 fontSize: '11px'
                             }}>
                                 <div style={{ color: '#8b949e', marginBottom: '4px' }}>Latest API Play Result:</div>
-                                <div style={{ color: '#c9d1d9' }}>Energy: <span style={{ color: '#4db8ff' }}>{lastApiStepResult.energyConsumed?.toFixed(2)}</span></div>
+                                <div style={{ color: '#c9d1d9' }}>
+                                    Energy Consumed: <span style={{ color: '#4db8ff' }}>{lastApiStepResult.energyConsumed?.toFixed(2)}</span>
+                                    {lastApiStepResult.energyLeft !== undefined && (
+                                        <div style={{ color: '#c9d1d9', marginTop: '4px' }}>
+                                            Energy Left: <span style={{ color: '#00ff66' }}>{lastApiStepResult.energyLeft?.toFixed(1)}</span>
+                                        </div>
+                                    )}
+                                </div>
                                 {lastApiStepResult.failure && (
                                     <div style={{ color: '#f85149', fontWeight: 'bold', marginTop: '4px' }}>
                                         FAILURE: {lastApiStepResult.failure}
@@ -353,7 +360,7 @@ const Sidebar = ({
                     <div className="config-group">
                         <label>Total Obstacle Area (%): {config.TOTAL_OBSTACLE_AREA_PER_LEVEL}</label>
                         <input
-                            type="range" min="0" max="50" step="1"
+                            type="range" min="0" max="100" step="1"
                             value={config.TOTAL_OBSTACLE_AREA_PER_LEVEL}
                             onChange={e => handleConfigChange('TOTAL_OBSTACLE_AREA_PER_LEVEL', parseInt(e.target.value))}
                         />

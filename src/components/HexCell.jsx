@@ -1,8 +1,8 @@
-import React, { useRef, useMemo, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+
+import React, { useRef, useMemo } from 'react';
 import * as THREE from 'three';
 
-const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = false, isGameOver = false }) => {
+const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = false, isGameOver = false, showCoverage = false }) => {
     const meshRef = useRef();
 
     const hexShape = useMemo(() => {
@@ -38,6 +38,7 @@ const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = 
 
     return (
         <group position={position}>
+            {/* Main Cell Body */}
             <mesh
                 rotation={[-Math.PI / 2, 0, Math.PI / 6]}
                 onClick={(e) => {
@@ -53,20 +54,36 @@ const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = 
                     emissiveIntensity={active || (isGameOver && shouldBeOn && !active) ? 1.5 : 0.5}
                     transparent={!active && !(isGameOver && shouldBeOn)}
                     opacity={(active || (isGameOver && shouldBeOn && !active)) ? 1.0 : 0.8}
+                    metalness={0.8}
+                    roughness={0.2}
                 />
             </mesh>
+
             {/* Cell Border/Outline */}
             <lineSegments rotation={[-Math.PI / 2, 0, Math.PI / 6]} position={[0, 0.03, 0]}>
                 <edgesGeometry args={[new THREE.ExtrudeGeometry(hexShape, { depth: 0.05, bevelEnabled: false })]} />
                 <lineBasicMaterial color={active ? "white" : "#ffffff"} transparent opacity={active ? 0.8 : 0.3} />
             </lineSegments>
+
+            {/* Coverage Boundary (Visible if active or explicitly requested) */}
+            {(showCoverage || active) && (
+                <mesh rotation={[-Math.PI / 2, 0, Math.PI / 6]} position={[0, -0.05, 0]}>
+                    <ringGeometry args={[serviceRadius - 0.5, serviceRadius, 6]} />
+                    <meshBasicMaterial
+                        color={color}
+                        transparent
+                        opacity={0.3}
+                        side={THREE.DoubleSide}
+                    />
+                </mesh>
+            )}
         </group>
     );
 };
 
 // Simplified coordinate helper
 export const getHexPosition = (q, r, radius) => {
-    const x = radius * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r);
+    const x = radius * (Math.sqrt(3) * q + (Math.sqrt(3) / 2) * r);
     const y = radius * (1.5 * r);
     return [x, 0, y];
 };

@@ -116,20 +116,19 @@ export const generateWorld = (config, physicalMap = null, resetMap = true, logge
 
             minionTypes.forEach(type => {
                 const zones = [];
-                const N = Math.floor(Math.random() * 5) + 1; // 1 to 5 per size class for better distribution
 
-                // Distribution ratio 3:2:1 for Large:Medium:Small
-                const areaLarge = (areaPerType * 3 / 6) / N;
-                const areaMedium = (areaPerType * 2 / 6) / N;
-                const areaSmall = (areaPerType * 1 / 6) / N;
-
+                // Define fixed sizes for obstacles
                 const sizeClasses = [
-                    { base: Math.sqrt(areaLarge), label: 'Large' },
-                    { base: Math.sqrt(areaMedium), label: 'Medium' },
-                    { base: Math.sqrt(areaSmall), label: 'Small' }
+                    { base: 12, weight: 0.5, label: 'Large' },
+                    { base: 8, weight: 0.3, label: 'Medium' },
+                    { base: 5, weight: 0.2, label: 'Small' }
                 ];
 
-                sizeClasses.forEach(sizeClass => {
+                sizeClasses.forEach(sc => {
+                    const targetAreaForClass = areaPerType * sc.weight;
+                    const areaPerObstacle = sc.base * sc.base;
+                    const N = Math.max(1, Math.round(targetAreaForClass / areaPerObstacle));
+
                     for (let i = 0; i < N; i++) {
                         let placed = false;
                         let attempts = 0;
@@ -140,7 +139,7 @@ export const generateWorld = (config, physicalMap = null, resetMap = true, logge
 
                             // Size with small variance (+/- 10%)
                             const variance = (Math.random() * 0.2) + 0.9; // 0.9 to 1.1
-                            const size = sizeClass.base * variance;
+                            const size = sc.base * variance;
                             const halfSize = size / 2;
 
                             // Random position
@@ -325,19 +324,6 @@ export const generateWorld = (config, physicalMap = null, resetMap = true, logge
                     const capProvider = coveringCells.find(c => c.type === CELL_TYPES.CAPACITY);
                     if (capProvider) {
                         capProvider.active = true;
-                        // Backhaul ensuring
-                        let bestBackhaul = null;
-                        let minDist = Infinity;
-                        newLevels.forEach(lvl => {
-                            lvl.cells.filter(c => c.type === CELL_TYPES.COVERAGE).forEach(cov => {
-                                const d = Math.sqrt((capProvider.x - cov.x) ** 2 + (capProvider.z - cov.z) ** 2);
-                                if (d < config.COVERAGE_CELL_RADIUS && d < minDist) {
-                                    minDist = d;
-                                    bestBackhaul = cov;
-                                }
-                            });
-                        });
-                        if (bestBackhaul) bestBackhaul.active = true;
                     } else {
                         const covProvider = coveringCells.find(c => c.type === CELL_TYPES.COVERAGE);
                         if (covProvider) covProvider.active = true;

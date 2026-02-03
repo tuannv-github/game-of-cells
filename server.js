@@ -383,7 +383,7 @@ app.post('/api/player/step', (req, res) => {
     );
 
     // 3. Evaluate Coverage
-    const { minionStates, energyConsumed, failure, cellsShouldBeOn, uncoveredMinions } = evaluateCoverage(
+    const { minionStates, energyConsumed, failure, cellsShouldBeOn, uncoveredMinions, functionalCellIds } = evaluateCoverage(
         movedMinions,
         newLevels,
         currentConfig,
@@ -433,7 +433,8 @@ app.post('/api/player/step', (req, res) => {
         gameOver: logicalFailure,
         uncoveredMinions: logicalFailure ? uncoveredMinions : undefined,
         currentStep,
-        cellsShouldBeOn: logicalFailure ? cellsShouldBeOn : undefined
+        cellsShouldBeOn: logicalFailure ? cellsShouldBeOn : undefined,
+        functionalCellIds
     };
 
     // Set game over flag
@@ -462,7 +463,8 @@ app.post('/api/player/step', (req, res) => {
             totalEnergyConsumed: newTotalEnergyConsumed,
             energyLeft,
             uncoveredMinions: logicalFailure ? uncoveredMinions : undefined,
-            gameOver: logicalFailure
+            gameOver: logicalFailure,
+            functionalCellIds
         }
     };
     fs.writeFileSync(intermediateSavePath, JSON.stringify(fullState, null, 2));

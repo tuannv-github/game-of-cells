@@ -566,7 +566,7 @@ const App = () => {
             <div className="map-container">
                 <div className="status-overlay">
                     <div className="status-title">{status}</div>
-                    <div className="status-sub">Step {currentStep} / {config.TARGET_STEPS}</div>
+                    <div className="status-sub">Step {currentStep} / {config.TARGET_STEPS} | Energy Left: {(config.TOTAL_ENERGY - totalEnergyConsumed).toFixed(1)}</div>
                 </div>
 
                 <Canvas camera={{ position: [30, 40, 50], fov: 45 }}>

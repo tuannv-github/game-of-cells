@@ -145,33 +145,14 @@ export const evaluateCoverage = (minions, levels, config, logger) => {
         });
     });
 
-    // Aggregate ALL active coverage cells from ALL levels for global backhaul availability
-    const allActiveCoverage = [];
-    levels.forEach(l => {
-        allActiveCoverage.push(...l.cells.filter(c => c.active && c.type === 'coverage'));
-    });
-
-    // Identify functional capacity cells (Active + Backhauled)
-    // Map of functional capacity cells by ID for quick lookup? Or just list.
-    // We need list to check coverage.
+    // Identify functional capacity cells (All Active Cells)
     const functionalCapacityCells = [];
     levels.forEach(l => {
-        const activeCapacity = l.cells.filter(c => c.active && c.type === 'capacity');
-
-        activeCapacity.forEach(cap => {
-            const isBackhauled = allActiveCoverage.some(cov => {
-                const dx = cap.x - cov.x;
-                const dz = cap.z - cov.z;
-                // Backhaul uses simple 2D projection distance
-                const dist = Math.sqrt(dx * dx + dz * dz);
-                return dist < config.COVERAGE_CELL_RADIUS;
-            });
-            if (isBackhauled) functionalCapacityCells.push(cap);
-        });
+        functionalCapacityCells.push(...l.cells.filter(c => c.active && c.type === 'capacity'));
     });
 
     const log = logger || (typeof remoteLog !== 'undefined' ? { log: remoteLog } : console);
-    // if (log.log) log.log(`[SIM] Global Backhaul: ${functionalCapacityCells.length} Capacity cells active and backhauled.`);
+    // if (log.log) log.log(`[SIM] Functional Cells: ${functionalCapacityCells.length} Capacity cells active.`);
 
     // Tracking Assignment
     // cellAssignments: { cellId: { cell, load, minions: [] } }
@@ -302,11 +283,18 @@ export const evaluateCoverage = (minions, levels, config, logger) => {
         if (log.log) log.log(`[SIM] Step 2 Success: All ${minions.length} minions served within capacity.`);
     }
 
+    // Identify ALL functional cells (All Active Cells)
+    const allFunctionalIds = [];
+    levels.forEach(l => {
+        allFunctionalIds.push(...l.cells.filter(c => c.active).map(c => c.id));
+    });
+
     return {
         minionStates,
         energyConsumed,
         failure,
         cellsShouldBeOn: Array.from(cellsShouldBeOn),
-        uncoveredMinions: uncoveredMinionIds
+        uncoveredMinions: uncoveredMinionIds,
+        functionalCellIds: allFunctionalIds
     };
 };
