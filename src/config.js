@@ -2,6 +2,7 @@ export const DEFAULT_CONFIG = {
     // Global Settings
     TARGET_STEPS: 100,
     MINION_ENERGY_COST: 1.0,
+    TOTAL_ENERGY: 1000,
     MAP_LEVELS: 2,
     COVERAGE_CELLS_COUNT: 7,
     CAPACITY_CELLS_COUNT: 37,
@@ -61,7 +62,7 @@ export const DEFAULT_CONFIG = {
         COUNT: 2,
         MAX_MOVE: 5.0,
         REQ_THROUGHPUT: 15,
-        COLOR: '#ff0066',
+        COLOR: '#3366ff',
         SIZE: 2.5
     },
     TURTLE_BOT: {

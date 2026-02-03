@@ -1,14 +1,13 @@
-version: '3.8'
-
 services:
-  game-of-cells:
+  app:
     build: .
     ports:
-      - "5173:5173"
+      - "40000:40000"
+      - "40001:40001"
     volumes:
       - .:/app
       - /app/node_modules
-    command: npm run dev -- --host
+    command: npm run dev:full
     environment:
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true

@@ -6,8 +6,10 @@ import HexCell, { getHexPosition } from './components/HexCell';
 import Minion from './components/Minion';
 import { DEFAULT_CONFIG, CELL_TYPES } from './config';
 import { moveMinion, evaluateCoverage } from './engine/simulation';
+import { generateWorld as generateWorldEngine } from './engine/generation';
 import { loadMap } from './engine/MapLoader';
 import { remoteLog } from './utils/logger';
+
 
 const App = () => {
     const [config, setConfig] = useState(() => {
@@ -32,6 +34,10 @@ const App = () => {
     const [currentStep, setCurrentStep] = useState(() => {
         const saved = localStorage.getItem('goc_currentStep');
         return saved ? parseInt(saved) : 0;
+    });
+    const [totalEnergyConsumed, setTotalEnergyConsumed] = useState(() => {
+        const saved = localStorage.getItem('goc_totalEnergyConsumed');
+        return saved ? parseFloat(saved) : 0;
     });
     const [worldState, setWorldState] = useState(() => {
         const saved = localStorage.getItem('goc_worldState');
@@ -90,6 +96,14 @@ const App = () => {
     }, [physicalMap]);
 
     useEffect(() => {
+        localStorage.setItem('goc_currentStep', currentStep.toString());
+    }, [currentStep]);
+
+    useEffect(() => {
+        localStorage.setItem('goc_totalEnergyConsumed', totalEnergyConsumed.toString());
+    }, [totalEnergyConsumed]);
+
+    useEffect(() => {
         localStorage.setItem('goc_mapRadius', JSON.stringify(mapRadius));
     }, [mapRadius]);
 
@@ -136,540 +150,105 @@ const App = () => {
 
     const layerOffsets = config.LAYER_OFFSETS || DEFAULT_CONFIG.LAYER_OFFSETS;
 
+    // API Sync States
+    const [useBackend, setUseBackend] = useState(true);
+    const [autoSync, setAutoSync] = useState(true);
+    const [lastApiStepResult, setLastApiStepResult] = useState(null);
 
+    const fetchApiState = useCallback(async () => {
+        try {
+            const response = await fetch('/api/player/get-state');
+            const data = await response.json();
+            if (data.worldState) {
+                setWorldState(data.worldState);
+                if (data.physicalMap) setPhysicalMap(data.physicalMap);
+                if (data.config) setConfig(data.config);
+                if (data.lastResult) setLastApiStepResult(data.lastResult);
+
+                // Update radius if physical map changed
+                if (data.physicalMap && data.physicalMap.levels) {
+                    // Logic to update mapRadius if needed
+                }
+            }
+        } catch (err) {
+            remoteLog(`[API] Sync failed: ${err.message}`, 'error');
+        }
+    }, [setConfig]);
+
+    useEffect(() => {
+        let interval;
+        if (autoSync) {
+            interval = setInterval(fetchApiState, 2000);
+        }
+        return () => clearInterval(interval);
+    }, [autoSync, fetchApiState]);
+
+    const handleToggleAutoSync = () => {
+        setAutoSync(prev => !prev);
+        if (!autoSync) {
+            remoteLog('[API] Auto-sync enabled. Polling server state...');
+        }
+    };
     // Initialize world on mount
     // Initialize world on mount - REMOVED to prevent auto-generation on reload
 
-    const generateWorld = useCallback((resetMap = false) => {
-        const newLevels = [];
-        let maxExt = 30; // Minimum floor size
+    const generateWorld = useCallback(async (resetMap = false) => {
+        if (useBackend) {
+            remoteLog('[API] Generating world via backend...');
+            try {
+                // First sync config to backend
+                await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
 
-        // Helper to generate concentric hexagonal coordinates
-        const generateHexSpiral = (count) => {
-            const temp = [];
-            const range = Math.ceil(Math.sqrt(count)) + 2;
-            for (let q = -range; q <= range; q++) {
-                for (let r = -range; r <= range; r++) {
-                    const s = -q - r;
-                    const dist = Math.max(Math.abs(q), Math.abs(r), Math.abs(s));
-                    temp.push({ q, r, dist });
+                // Then trigger generation
+                const resp = await fetch('/api/generate', { method: 'POST' });
+                const data = await resp.json();
+
+                if (data.worldState) {
+                    setWorldState(data.worldState);
+                    setPhysicalMap(data.physicalMap);
+                    setMapRadius(data.mapRadius);
+                    setCurrentStep(0);
+                    setTotalEnergyConsumed(0);
+                    setLastApiStepResult(null);
+                    setStatus('New Backend Simulation Started');
+                    remoteLog(`[API] Generated: ${data.worldState.levels.length} levels, ${data.worldState.minions.length} minions.`);
                 }
+            } catch (err) {
+                remoteLog(`[ERROR] Backend generation failed: ${err.message}`, 'error');
             }
-            temp.sort((a, b) => {
-                if (a.dist !== b.dist) return a.dist - b.dist;
-                return Math.atan2(a.r, a.q) - Math.atan2(b.r, b.q);
-            });
-            return temp.slice(0, count);
+            return;
+        }
+
+        const logger = {
+            log: (msg) => remoteLog(msg, 'info'),
+            warn: (msg) => remoteLog(msg, 'warn'),
+            error: (msg) => remoteLog(msg, 'error')
         };
 
-        // 1. Pre-calculate Centers (Hexagonal Spiral Layout)
-        const numCoverage = Math.max(0, config.COVERAGE_CELL_RADIUS > 0 ? config.COVERAGE_CELLS_COUNT : 0);
-        const covSpacing = config.COVERAGE_CELL_RADIUS;
-        const covCoords = generateHexSpiral(numCoverage);
-
-        const numCapacity = Math.max(0, config.CAPACITY_CELLS_COUNT);
-        const capSpacing = config.CAPACITY_CELL_RADIUS;
-        const capCoords = generateHexSpiral(numCapacity);
-
-        // Update maxExt based on spiral distribution
-        covCoords.forEach(coord => {
-            const pos = getHexPosition(coord.q, coord.r, covSpacing);
-            const dist = Math.sqrt(pos[0] ** 2 + pos[2] ** 2);
-            if (dist > maxExt) maxExt = dist;
-        });
-        capCoords.forEach(coord => {
-            const pos = getHexPosition(coord.q, coord.r, capSpacing);
-            const dist = Math.sqrt(pos[0] ** 2 + pos[2] ** 2);
-            if (dist > maxExt) maxExt = dist;
-        });
-        // 1.3 Calculate Area-Based Radius
-        const totalCoverageArea = numCoverage * Math.PI * Math.pow(config.COVERAGE_CELL_RADIUS, 2);
-        const areaBasedRadius = Math.sqrt(totalCoverageArea / Math.PI); // Simplifies to sqrt(N) * R
-
-        // Final radius ensures a minimum floor size and adds a 20% margin for the architecture
-        const finalRadius = Math.max(80, areaBasedRadius * 1.2);
-        setMapRadius(finalRadius);
-
-        remoteLog(`[GEN] Starting gNodeB layer generation: levels=${config.MAP_LEVELS}, cov_count=${numCoverage}, cap_count=${numCapacity}`);
-
-        for (let l = 0; l < config.MAP_LEVELS; l++) {
-            const levelCells = [];
-            covCoords.forEach((center, idx) => {
-                const pos = getHexPosition(center.q, center.r, covSpacing);
-                levelCells.push({
-                    id: `cell_${l}_cov_${idx}`,
-                    x: pos[0], z: pos[2], q: center.q, r: center.r,
-                    type: CELL_TYPES.COVERAGE, active: false, level: l
-                });
-            });
-
-            capCoords.forEach((center, idx) => {
-                const pos = getHexPosition(center.q, center.r, capSpacing);
-                levelCells.push({
-                    id: `cell_${l}_cap_${idx}`,
-                    x: pos[0], z: pos[2], q: center.q, r: center.r,
-                    type: CELL_TYPES.CAPACITY, active: false, level: l
-                });
-            });
-
-            newLevels.push({ id: l, cells: levelCells });
-            remoteLog(`[GEN] Level ${l}: Generated ${covCoords.length} coverage cells and ${capCoords.length} capacity cells`);
-        }
-
-        remoteLog(`[GEN] Starting world generation: levels=${config.MAP_LEVELS}, radius=${finalRadius}, obstacle_pct=${config.TOTAL_OBSTACLE_AREA_PER_LEVEL ?? 10}%`);
-
-        let generatedPhysicalMap = null;
-        // 3. Dynamic Physical Map (Only on explicit click/mount)
-        if (resetMap || !physicalMap) {
-            generatedPhysicalMap = { levels: [] };
-            for (let l = 0; l < config.MAP_LEVELS; l++) {
-                // 3.5 Type-Specific Exclusion Zones (Physical Layer 2.2 Calibrated)
-                const type_exclusion_zones = {};
-                const minionTypes = ['HUMAN', 'HUMANOID', 'DOG_ROBOT', 'TURTLE_BOT', 'DRONE'];
-
-                // Hexagon Area = (3 * sqrt(3) / 2) * R^2 approx 2.598 * R^2
-                const hexArea = 2.598 * finalRadius * finalRadius;
-
-                // Explicitly check for the config value to debug "stale state" issues
-                const obstaclePct = (config && typeof config.TOTAL_OBSTACLE_AREA_PER_LEVEL === 'number')
-                    ? config.TOTAL_OBSTACLE_AREA_PER_LEVEL
-                    : (DEFAULT_CONFIG.TOTAL_OBSTACLE_AREA_PER_LEVEL ?? 10);
-
-                const totalTargetArea = hexArea * (obstaclePct / 100);
-                const areaPerType = totalTargetArea / minionTypes.length;
-
-                remoteLog(`[GEN] Level ${l}: Hex Area=${hexArea.toFixed(1)}, Target Obstacle Area=${totalTargetArea.toFixed(1)} (${obstaclePct}% from ${typeof config.TOTAL_OBSTACLE_AREA_PER_LEVEL === 'number' ? 'state' : 'DEFAULT_CONFIG fallback'})`);
-
-                minionTypes.forEach(type => {
-                    const zones = [];
-                    const N = Math.floor(Math.random() * 5) + 1; // 1 to 5 per size class for better distribution
-
-                    // Distribution ratio 3:2:1 for Large:Medium:Small
-                    const areaLarge = (areaPerType * 3 / 6) / N;
-                    const areaMedium = (areaPerType * 2 / 6) / N;
-                    const areaSmall = (areaPerType * 1 / 6) / N;
-
-                    const sizeClasses = [
-                        { base: Math.sqrt(areaLarge), label: 'Large' },
-                        { base: Math.sqrt(areaMedium), label: 'Medium' },
-                        { base: Math.sqrt(areaSmall), label: 'Small' }
-                    ];
-
-                    sizeClasses.forEach(sizeClass => {
-                        for (let i = 0; i < N; i++) {
-                            let placed = false;
-                            let attempts = 0;
-                            const maxAttempts = 200;
-
-                            while (!placed && attempts < maxAttempts) {
-                                attempts++;
-
-                                // Size with small variance (+/- 10%)
-                                const variance = (Math.random() * 0.2) + 0.9; // 0.9 to 1.1
-                                const size = sizeClass.base * variance;
-                                const halfSize = size / 2;
-
-                                // Random position
-                                const spawnRadius = finalRadius - halfSize;
-                                if (spawnRadius <= 0) continue; // Should not happen with reasonable N
-
-                                const r = Math.random() * spawnRadius;
-                                const theta = Math.random() * 2 * Math.PI;
-                                const x = r * Math.cos(theta);
-                                const z = r * Math.sin(theta);
-
-                                // 1. Strict Boundary Check
-                                const farX = Math.abs(x) + halfSize;
-                                const farZ = Math.abs(z) + halfSize;
-                                const cornerDist = Math.sqrt(farX * farX + farZ * farZ);
-                                if (cornerDist >= finalRadius) continue;
-
-                                // 2. Overlap Check
-                                let overlap = false;
-                                for (const other of zones) {
-                                    const otherHalf = other.size / 2;
-                                    const dx = Math.abs(x - other.x);
-                                    const dz = Math.abs(z - other.z);
-                                    const minSpacing = 2;
-
-                                    if (dx < (halfSize + otherHalf + minSpacing) &&
-                                        dz < (halfSize + otherHalf + minSpacing)) {
-                                        overlap = true;
-                                        break;
-                                    }
-                                }
-
-                                if (overlap) continue;
-
-                                // 3. Center Hub Safety
-                                if (Math.sqrt(x * x + z * z) < 15 + halfSize) continue;
-
-                                zones.push({ x, z, size, type });
-                                placed = true;
-                            }
-                        }
-                    });
-
-                    type_exclusion_zones[type] = zones;
-                    remoteLog(`[GEN] Level ${l} - ${type}: Placed ${zones.length} obstacles`);
-                });
-
-                // 3.6 Initialize Empty Transition Zones (Filled in Post-Processing)
-                generatedPhysicalMap.levels.push({
-                    type_exclusion_zones,
-                    transition_zones: []
-                });
-            }
-
-            // 4. Post-Processing: Generate Coupled Transition Zones (Level L <-> Level L+1)
-            // Iterate through level pairs (0-1, 1-2, 2-3, etc.)
-            for (let l = 0; l < generatedPhysicalMap.levels.length - 1; l++) {
-                const currentLevel = generatedPhysicalMap.levels[l];
-                const nextLevel = generatedPhysicalMap.levels[l + 1];
-
-                const numCouples = Math.max(0, Number(config.PORTAL_PAIR_COUNT) || 0);
-                const portalAreaValue = Number(config.PORTAL_AREA) || 0;
-                remoteLog(`[GEN] Portal generation config: pairs=${numCouples}, area=${portalAreaValue}`);
-
-                for (let k = 0; k < numCouples; k++) {
-                    let placed = false;
-                    let attempts = 0;
-                    const maxPairAttempts = 20; // try fewer random attempts, then fallback
-                    const minPairSpacing = 2; // spacing buffer
-
-                    // Precompute constants so fallback can reference them
-                    const radius = Math.sqrt(portalAreaValue / Math.PI);
-                    const hexApothem = finalRadius * (Math.sqrt(3) / 2);
-                    const spawnRadius = Math.max(0, hexApothem - radius - 1); // -1 buffer
-
-                    const portalExclusionIgnore = new Set(['TURTLE_BOT', 'DRONE']);
-
-                    const checkExclusion = (lvl, cx, cz) => {
-                        for (const typeKey in lvl.type_exclusion_zones) {
-                            // Skip exclusion zones for minion types when placing portals
-                            if (portalExclusionIgnore.has(typeKey)) continue;
-                            const arr = lvl.type_exclusion_zones[typeKey] || [];
-                            for (let zi = 0; zi < arr.length; zi++) {
-                                const zone = arr[zi];
-                                const half = zone.size / 2;
-                                const closestX = Math.max(zone.x - half, Math.min(cx, zone.x + half));
-                                const closestZ = Math.max(zone.z - half, Math.min(cz, zone.z + half));
-                                const dist = Math.sqrt((cx - closestX) ** 2 + (cz - closestZ) ** 2);
-                                if (dist < radius + 2) {
-                                    return { typeKey, index: zi, zone, dist };
-                                }
-                            }
-                        }
-                        return null;
-                    };
-
-                    const rejectionCounts = {};
-                    const noteRejection = (reason) => { rejectionCounts[reason] = (rejectionCounts[reason] || 0) + 1; };
-
-                    while (!placed && attempts < maxPairAttempts) {
-                        attempts++;
-
-                        if (spawnRadius <= 0) {
-                            noteRejection('spawnRadius<=0');
-                            remoteLog(`[GEN] spawnRadius <= 0, cannot place zone: hexApothem=${hexApothem.toFixed(2)} radius=${radius.toFixed(2)}`, 'warn');
-                            break; // abort attempts for this pair
-                        }
-
-                        const r = Math.random() * spawnRadius;
-                        const theta = Math.random() * 2 * Math.PI;
-                        const x = r * Math.cos(theta);
-                        const z = r * Math.sin(theta);
-
-                        // 1. Bounds Check (Redundant with spawnRadius but safe)
-                        if (Math.sqrt(x * x + z * z) > spawnRadius) { noteRejection('out_of_bounds'); continue; }
-
-                        // 2. Overlap Check (Current Level Transition Zones)
-                        if ((currentLevel.transition_zones || currentLevel.transition_areas || []).some(t => Math.sqrt((x - ((t.x ?? t.center?.x ?? 0))) ** 2 + (z - ((t.z ?? t.center?.z ?? 0))) ** 2) < radius + (t.radius ?? t.r ?? 0) + minPairSpacing)) { noteRejection('overlap_current'); continue; }
-
-                        // 3. Overlap Check (Next Level Transition Zones)
-                        if ((nextLevel.transition_zones || nextLevel.transition_areas || []).some(t => Math.sqrt((x - ((t.x ?? t.center?.x ?? 0))) ** 2 + (z - ((t.z ?? t.center?.z ?? 0))) ** 2) < radius + (t.radius ?? t.r ?? 0) + minPairSpacing)) { noteRejection('overlap_next'); continue; }
-
-                        // 4. Exclusion Check (BOTH Levels)
-                        const exclCur = checkExclusion(currentLevel, x, z);
-                        if (exclCur) { noteRejection(`exclusion_collision:${exclCur.typeKey}:${exclCur.index}`); continue; }
-                        const exclNext = checkExclusion(nextLevel, x, z);
-                        if (exclNext) { noteRejection(`exclusion_collision:${exclNext.typeKey}:${exclNext.index}`); continue; }
-
-                        // Place Pair
-                        // Up Zone (L -> L+1)
-                        currentLevel.transition_zones.push({ x, z, radius, targetLevel: l + 1, id: `couple_${l}_${l + 1}_${k}_up` });
-                        // Down Zone (L+1 -> L)
-                        nextLevel.transition_zones.push({ x, z, radius, targetLevel: l, id: `couple_${l}_${l + 1}_${k}_down` });
-                        placed = true;
-                        remoteLog(`[GEN] Placed Zone Pair ${k} between L${l}-L${l + 1} at (${x.toFixed(1)}, ${z.toFixed(1)})`);
-                    }
-                    if (!placed) {
-                        // Log aggregated rejection reasons before running fallback
-                        try {
-                            const reasons = Object.entries(rejectionCounts).map(([k, v]) => `${k}:${v}`).join(', ') || 'none';
-                            remoteLog(`[GEN] Random placement failed for pair ${k} after ${attempts} attempts. Reasons: ${reasons}`);
-                        } catch (err) {
-                            remoteLog(`[ERROR] Failed to log rejection reasons for pair ${k}: ${err.message}`, 'error');
-                        }
-                        // Fallback deterministic search: try concentric rings to find any valid position
-                        let fallbackPlaced = false;
-                        try {
-                            const ringSteps = 8;
-                            const angleSteps = 24;
-                            for (let ri = 0; ri <= ringSteps && !fallbackPlaced; ri++) {
-                                const rr = (spawnRadius * ri) / Math.max(1, ringSteps);
-                                for (let ai = 0; ai < angleSteps && !fallbackPlaced; ai++) {
-                                    const thetaF = (ai / angleSteps) * Math.PI * 2;
-                                    const fx = rr * Math.cos(thetaF);
-                                    const fz = rr * Math.sin(thetaF);
-
-                                    // Bounds check
-                                    if (Math.sqrt(fx * fx + fz * fz) > spawnRadius) continue;
-
-                                    // Overlap with current
-                                    const overlapCurrent = (currentLevel.transition_zones || currentLevel.transition_areas || []).some(t => Math.sqrt((fx - ((t.x ?? t.center?.x ?? 0))) ** 2 + (fz - ((t.z ?? t.center?.z ?? 0))) ** 2) < radius + (t.radius ?? t.r ?? 0) + minPairSpacing);
-                                    if (overlapCurrent) continue;
-
-                                    // Overlap with next
-                                    const overlapNext = (nextLevel.transition_zones || nextLevel.transition_areas || []).some(t => Math.sqrt((fx - ((t.x ?? t.center?.x ?? 0))) ** 2 + (fz - ((t.z ?? t.center?.z ?? 0))) ** 2) < radius + (t.radius ?? t.r ?? 0) + minPairSpacing);
-                                    if (overlapNext) continue;
-
-                                    // Exclusion check using centralized checker with saved coords
-                                    const savedX = fx; const savedZ = fz;
-                                    const exclCurF = checkExclusion(currentLevel, savedX, savedZ);
-                                    if (exclCurF) { noteRejection(`exclusion_collision:${exclCurF.typeKey}:${exclCurF.index}`); continue; }
-                                    const exclNextF = checkExclusion(nextLevel, savedX, savedZ);
-                                    if (exclNextF) { noteRejection(`exclusion_collision:${exclNextF.typeKey}:${exclNextF.index}`); continue; }
-
-                                    // Place via fallback
-                                    currentLevel.transition_zones.push({ x: savedX, z: savedZ, radius, targetLevel: l + 1, id: `couple_${l}_${l + 1}_${k}_up_fallback` });
-                                    nextLevel.transition_zones.push({ x: savedX, z: savedZ, radius, targetLevel: l, id: `couple_${l}_${l + 1}_${k}_down_fallback` });
-                                    fallbackPlaced = true;
-                                    remoteLog(`[GEN] Fallback placed Zone Pair ${k} between L${l}-L${l + 1} at (${savedX.toFixed(1)}, ${savedZ.toFixed(1)}) after deterministic search`);
-                                }
-                            }
-                        } catch (err) {
-                            remoteLog(`[ERROR] Fallback placement error for Zone Pair ${k}: ${err.message}`, 'error');
-                        }
-
-                        if (!fallbackPlaced) {
-                            remoteLog(`[GEN] Failed to place Zone Pair ${k} after ${maxPairAttempts} attempts and fallback search`);
-                        }
-                    }
-                }
-
-                // Summary log for this level pair: how many pairs were placed and their positions
-                try {
-                    const placedUpZones = (currentLevel.transition_zones || []).filter(t => t.targetLevel === l + 1);
-                    if (placedUpZones.length > 0) {
-                        const positions = placedUpZones.map(p => `(${p.x.toFixed(1)}, ${p.z.toFixed(1)})`).join('; ');
-                        remoteLog(`[GEN] Summary: Placed ${placedUpZones.length} portal pair(s) between L${l}-L${l + 1}: ${positions}`);
-                    } else {
-                        remoteLog(`[GEN] Summary: Placed 0 portal pairs between L${l}-L${l + 1}`);
-                    }
-                } catch (err) {
-                    remoteLog(`[ERROR] Failed to summarize portal placements for L${l}-L${l + 1}: ${err.message}`, 'error');
-                }
-            }
-
-            // Global summary across all level pairs
-            try {
-                let totalPairs = 0;
-                const allPositions = [];
-                for (let l = 0; l < generatedPhysicalMap.levels.length - 1; l++) {
-                    const ups = (generatedPhysicalMap.levels[l].transition_zones || []).filter(t => t.targetLevel === l + 1);
-                    totalPairs += ups.length;
-                    ups.forEach(p => allPositions.push(`L${l}->L${l + 1}@(${p.x.toFixed(1)},${p.z.toFixed(1)})`));
-                }
-                remoteLog(`[GEN] Total portal pairs generated across map: ${totalPairs}. Positions: ${allPositions.join('; ')}`);
-            } catch (err) {
-                remoteLog(`[ERROR] Failed to produce global portal summary: ${err.message}`, 'error');
-            }
-
-            setPhysicalMap(generatedPhysicalMap);
-        }
-
-        // Always regenerate minions to match new radius/distribution
-        const newMinions = [];
-        const minionKeys = ['HUMAN', 'HUMANOID', 'DOG_ROBOT', 'TURTLE_BOT', 'DRONE'];
-        minionKeys.forEach(typeKey => {
-            const mConfig = config[typeKey];
-            if (mConfig.ENABLED) {
-                for (let i = 0; i < mConfig.COUNT; i++) {
-                    const assignedLevel = Math.floor(Math.random() * config.MAP_LEVELS);
-                    let mx, mz;
-                    let validPosition = false;
-                    let attempt = 0;
-
-                    // Try to find a position within coverage/capacity and OUTSIDE exclusion zones
-                    while (!validPosition && attempt < 100) {
-                        attempt++;
-                        // Circular random position
-                        const r = Math.sqrt(Math.random()) * (finalRadius * 0.9);
-                        const theta = Math.random() * 2 * Math.PI;
-                        mx = r * Math.cos(theta);
-                        mz = r * Math.sin(theta);
-
-                        // 1. Check if covered by any cell in this level
-                        const levelData = newLevels[assignedLevel];
-                        let isCovered = false;
-                        if (levelData) {
-                            for (const cell of levelData.cells) {
-                                const dx = mx - cell.x;
-                                const dz = mz - cell.z;
-                                const dist = Math.sqrt(dx * dx + dz * dz);
-                                const radius = cell.type === CELL_TYPES.COVERAGE ? covSpacing : capSpacing;
-                                if (dist <= radius) {
-                                    isCovered = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!isCovered) continue;
-
-                        // 2. Check against Type-Specific Exclusion Zones (Obstacles)
-                        const pMap = generatedPhysicalMap || physicalMap;
-                        if (pMap && pMap.levels && pMap.levels[assignedLevel]) {
-                            const typeKeyUpper = typeKey.toUpperCase();
-                            const levelExclusions = pMap.levels[assignedLevel].type_exclusion_zones?.[typeKey] || [];
-                            const mSize = config[typeKeyUpper]?.SIZE || 1.0;
-                            const mHalf = mSize / 2;
-
-                            let insideExclusion = false;
-                            for (const zone of levelExclusions) {
-                                const halfSize = zone.size / 2;
-                                // Check if minion's bounding box intersects with obstacle's bounding box
-                                if (Math.abs(mx - zone.x) < (halfSize + mHalf) &&
-                                    Math.abs(mz - zone.z) < (halfSize + mHalf)) {
-                                    insideExclusion = true;
-                                    break;
-                                }
-                            }
-                            if (insideExclusion) continue;
-                        }
-
-                        validPosition = true;
-                    }
-
-                    if (!validPosition) {
-                        // Keep the last random position generated
-                        // Ideally we should warn or retry, but for now we proceed
-                    }
-
-                    newMinions.push({
-                        id: `${typeKey.toLowerCase()}_${i}`,
-                        type: typeKey.toLowerCase(),
-                        x: mx,
-                        z: mz,
-                        level: assignedLevel,
-                        color: mConfig.COLOR,
-                        covered: true // Will be validated below
-                    });
-                }
-            }
-        });
-        remoteLog(`[GEN] Total Minions Generated: ${newMinions.length} across ${config.MAP_LEVELS} levels.`);
-
-        // 4. On-Demand Activation Logic
-        // "if minion in coverage of capacity cell --> turn on that cell --> ok for that minion"
-        // "if no capacity cell --> turn on capacity/coverage cell"
-        newMinions.forEach(minion => {
-            const levelCells = newLevels[minion.level]?.cells || [];
-            let handled = false;
-
-            // Priority 1: Check Capacity Cells
-            const capacityCells = levelCells.filter(c => c.type === CELL_TYPES.CAPACITY);
-            for (const cap of capacityCells) {
-                const dist = Math.sqrt((minion.x - cap.x) ** 2 + (minion.z - cap.z) ** 2);
-                if (dist <= capSpacing) {
-                    cap.active = true;
-
-                    // NEW: Ensure this Capacity cell is backhauled!
-                    // Search all levels for the nearest coverage cell
-                    let bestBackhaul = null;
-                    let minDist = Infinity;
-
-                    newLevels.forEach(lvl => {
-                        lvl.cells.filter(c => c.type === CELL_TYPES.COVERAGE).forEach(cov => {
-                            const d = Math.sqrt((cap.x - cov.x) ** 2 + (cap.z - cov.z) ** 2);
-                            if (d < config.COVERAGE_CELL_RADIUS && d < minDist) {
-                                minDist = d;
-                                bestBackhaul = cov;
-                            }
-                        });
-                    });
-
-                    if (bestBackhaul) {
-                        bestBackhaul.active = true;
-                    }
-
-                    handled = true;
-                    break; // Minion served by capacity
-                }
-            }
-
-            // Priority 2: Check Coverage Cells if not served
-            if (!handled) {
-                const coverageCells = levelCells.filter(c => c.type === CELL_TYPES.COVERAGE);
-                for (const cell of coverageCells) {
-                    const dist = Math.sqrt((minion.x - cell.x) ** 2 + (minion.z - cell.z) ** 2);
-                    if (dist <= covSpacing) {
-                        cell.active = true;
-                        handled = true;
-                        break; // Minion served by coverage
-                    }
-                }
-            }
-        });
-
-        // 5. Final Global Backhaul Validation
-        // Ensure that the serving logic didn't miss anything that simulation might catch
-        let validationFailed = false;
-        newMinions.forEach(minion => {
-            const level = newLevels[minion.level];
-            const activeCoverageOnLevel = level.cells.filter(c => c.active && c.type === CELL_TYPES.COVERAGE);
-
-            // Collect all functional capacity cells (active + backhauled)
-            const allActiveCoverage = [];
-            newLevels.forEach(l => allActiveCoverage.push(...l.cells.filter(c => c.active && c.type === CELL_TYPES.COVERAGE)));
-
-            const functionalCapacityOnLevel = level.cells.filter(c => {
-                if (!c.active || c.type !== CELL_TYPES.CAPACITY) return false;
-                return allActiveCoverage.some(cov => {
-                    const d = Math.sqrt((c.x - cov.x) ** 2 + (c.z - cov.z) ** 2);
-                    return d < config.COVERAGE_CELL_RADIUS;
-                });
-            });
-
-            const providers = [...activeCoverageOnLevel, ...functionalCapacityOnLevel];
-            const isServed = providers.some(p => {
-                const d = Math.sqrt((minion.x - p.x) ** 2 + (minion.z - p.z) ** 2);
-                const r = p.type === CELL_TYPES.CAPACITY ? capSpacing : covSpacing;
-                return d <= r;
-            });
-
-            if (!isServed) {
-                remoteLog(`[WARN] Minion ${minion.id} is placed but NOT SERVED (likely backhaul gap)!`, 'warn');
-                validationFailed = true;
-            }
-        });
-        if (validationFailed) {
-            remoteLog(`[GEN] Warning: Some minions could not be covered even after activation.`, 'warn');
-        } else {
-            remoteLog(`[GEN] Validation Success: All minions are covered.`, 'info');
-        }
-
-        setWorldState({ levels: newLevels, minions: newMinions });
+        const { worldState: newWorldState, physicalMap: newPhysicalMap, mapRadius: newRadius } = generateWorldEngine(
+            config,
+            physicalMap,
+            resetMap,
+            logger
+        );
+
+        setMapRadius(newRadius);
+        setPhysicalMap(newPhysicalMap);
+        setWorldState(newWorldState);
 
         // Immediate evaluation after generation
-        const { minionStates } = evaluateCoverage(newMinions, newLevels, config);
+        const { minionStates } = evaluateCoverage(newWorldState.minions, newWorldState.levels, config);
         setWorldState(prev => ({ ...prev, minions: minionStates }));
 
         setCurrentStep(0);
         setStatus('New Simulation Started');
-        remoteLog(`[SIM] Simulation Initialized: ${newLevels.length} levels, ${newMinions.length} minions.`);
+        remoteLog(`[SIM] Simulation Initialized: ${newWorldState.levels.length} levels, ${newWorldState.minions.length} minions.`);
         setShowHint(false);
-    }, [config]);
+    }, [config, physicalMap, useBackend]);
 
 
     // Reactive coverage update
@@ -838,8 +417,55 @@ const App = () => {
         }
     };
 
-    const nextStep = () => {
+    const nextStep = async () => {
         if (worldState.levels.length === 0) return;
+
+        if (useBackend) {
+            remoteLog('[API] Executing next step via backend...');
+            try {
+                // Calculate the list of cells that are currently ON
+                const activeCellIds = worldState.levels.flatMap(level =>
+                    level.cells.filter(cell => cell.active).map(cell => cell.id)
+                );
+
+                const response = await fetch('/api/player/step', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ on: activeCellIds })
+                });
+                const data = await response.json();
+                if (data.worldState) {
+                    setWorldState(data.worldState);
+                    if (data.currentStep !== undefined) setCurrentStep(data.currentStep);
+
+                    if (data.result === 'success') {
+                        setTotalEnergyConsumed(data.totalEnergyConsumed);
+                        const energyInfo = `Energy: ${data.energyConsumed.toFixed(1)} (Total: ${data.totalEnergyConsumed.toFixed(1)}/${config.TOTAL_ENERGY}, Left: ${data.energyLeft.toFixed(1)})`;
+                        const stepMsg = `Step ${data.currentStep} Success - ${energyInfo}`;
+                        setStatus(stepMsg);
+                        setLastApiStepResult({
+                            result: data.result,
+                            msg: data.msg,
+                            energyConsumed: data.energyConsumed,
+                            totalEnergyConsumed: data.totalEnergyConsumed,
+                            energyLeft: data.energyLeft
+                        });
+                        remoteLog(`[API] ${stepMsg}`);
+                    } else {
+                        setStatus(`GAME OVER: ${data.msg}`);
+                        setLastApiStepResult({
+                            result: data.result,
+                            msg: data.msg,
+                            cellsShouldBeOn: data.cellsShouldBeOn || []
+                        });
+                        remoteLog(`[API] Step ${data.currentStep} Failed: ${data.msg}`, 'error');
+                    }
+                }
+            } catch (err) {
+                remoteLog(`[ERROR] Backend step failed: ${err.message}`, 'error');
+            }
+            return;
+        }
 
         const { minionStates, failure } = evaluateCoverage(worldState.minions, worldState.levels, config);
         const movedMinions = minionStates.map(m => moveMinion(m, config, physicalMap));
@@ -850,6 +476,56 @@ const App = () => {
         setStatus(stepMsg);
         remoteLog(`[SIM] Step ${currentStep + 1}: ${stepMsg}`, failure ? 'warn' : 'info');
         setShowHint(false);
+    };
+
+    const restartGame = async () => {
+        try {
+            remoteLog('[API] Restarting game...');
+            const response = await fetch('/api/restart', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+
+            if (data.result === 'success') {
+                setWorldState(data.worldState);
+                setPhysicalMap(data.physicalMap);
+                setMapRadius(data.mapRadius);
+                setCurrentStep(0);
+                setTotalEnergyConsumed(0);
+                setStatus('Game Restarted');
+                setLastApiStepResult(null);
+                remoteLog('[API] Game restarted successfully');
+            }
+        } catch (err) {
+            remoteLog(`[ERROR] Restart failed: ${err.message}`, 'error');
+        }
+    };
+
+    const undoStep = async () => {
+        try {
+            remoteLog('[API] Undoing last step...');
+            const response = await fetch('/api/undo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+
+            if (data.result === 'success') {
+                setWorldState(data.worldState);
+                setPhysicalMap(data.physicalMap);
+                setCurrentStep(data.currentStep);
+                setTotalEnergyConsumed(data.totalEnergyConsumed);
+                setStatus(`Undone to Step ${data.currentStep}`);
+                setLastApiStepResult(null);
+                remoteLog(`[API] Undone to step ${data.currentStep}`);
+            } else {
+                setStatus(data.msg || 'Cannot undo');
+                remoteLog(`[API] Undo failed: ${data.msg}`, 'warn');
+            }
+        } catch (err) {
+            remoteLog(`[ERROR] Undo failed: ${err.message}`, 'error');
+        }
     };
 
     // Auto-load latest map on startup
@@ -909,6 +585,9 @@ const App = () => {
                     <group>
                         {worldState.levels.map((level, lIndex) => {
                             const baseY = lIndex * config.LEVEL_DISTANCE;
+
+                            const isGameOver = lastApiStepResult?.result === 'failure';
+
                             return (
                                 <group key={level.id}>
                                     {/* Level Floor Background (Dynamic Radius) */}
@@ -941,6 +620,8 @@ const App = () => {
                                                 active={cell.active}
                                                 serviceRadius={config.COVERAGE_CELL_RADIUS}
                                                 onClick={() => toggleCell(level.id, cell.id)}
+                                                shouldBeOn={cell.shouldBeOn}
+                                                isGameOver={isGameOver}
                                             />
                                         ))}
                                     </group>
@@ -955,6 +636,8 @@ const App = () => {
                                                 active={cell.active}
                                                 serviceRadius={config.CAPACITY_CELL_RADIUS}
                                                 onClick={() => toggleCell(level.id, cell.id)}
+                                                shouldBeOn={cell.shouldBeOn}
+                                                isGameOver={isGameOver}
                                             />
                                         ))}
                                     </group>
@@ -1076,6 +759,7 @@ const App = () => {
                                                     color={minion.color}
                                                     label={minion.type.charAt(0).toUpperCase()}
                                                     size={config[minion.type.toUpperCase()]?.SIZE || 1.0}
+                                                    isUncovered={!minion.covered}
                                                 />
                                             ))}
                                     </group>
@@ -1108,10 +792,17 @@ const App = () => {
                 onLoadServer={loadFromServer}
                 onDeleteServer={deleteFromServer}
                 onReset={resetSettings}
+                onRestart={restartGame}
+                onUndo={undoStep}
                 mapList={mapList}
                 onFetchMaps={fetchMapList}
                 layerVisibility={layerVisibility}
                 setLayerVisibility={setLayerVisibility}
+                useBackend={useBackend}
+                setUseBackend={setUseBackend}
+                autoSync={autoSync}
+                onToggleAutoSync={handleToggleAutoSync}
+                lastApiStepResult={lastApiStepResult}
             />
         </div>
     );

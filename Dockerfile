@@ -13,8 +13,9 @@ RUN npm install
 # Copy the rest of the application code
 COPY . .
 
-# Expose the Vite port
-EXPOSE 5173
+# Expose the UI and API ports
+EXPOSE 40000
+EXPOSE 40001
 
-# Run Vite in dev mode with host flag to allow external access
-CMD ["npm", "run", "dev", "--", "--host"]
+# Run the combined frontend and backend in dev mode
+CMD ["npm", "run", "dev:full"]

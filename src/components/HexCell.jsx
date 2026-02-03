@@ -2,7 +2,7 @@ import React, { useRef, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-const HexCell = ({ position, type, active, onClick, serviceRadius }) => {
+const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = false, isGameOver = false }) => {
     const meshRef = useRef();
 
     const hexShape = useMemo(() => {
@@ -19,6 +19,23 @@ const HexCell = ({ position, type, active, onClick, serviceRadius }) => {
         return shape;
     }, [serviceRadius]);
 
+    // Determine color based on state
+    const getColor = () => {
+        // If game is over and cell should be on but isn't, show red
+        if (isGameOver && shouldBeOn && !active) {
+            return '#ff0000'; // Red for missing coverage
+        }
+
+        // Normal colors
+        if (active) {
+            return type === 'capacity' ? '#00ff66' : '#4db8ff';
+        } else {
+            return type === 'capacity' ? '#2a4d3a' : '#30475e';
+        }
+    };
+
+    const color = getColor();
+
     return (
         <group position={position}>
             <mesh
@@ -31,15 +48,11 @@ const HexCell = ({ position, type, active, onClick, serviceRadius }) => {
             >
                 <extrudeGeometry args={[hexShape, { depth: 0.05, bevelEnabled: false }]} />
                 <meshStandardMaterial
-                    color={active
-                        ? (type === 'capacity' ? '#00ff66' : '#4db8ff')
-                        : (type === 'capacity' ? '#2a4d3a' : '#30475e')}
-                    emissive={active
-                        ? (type === 'capacity' ? '#00ff66' : '#4db8ff')
-                        : (type === 'capacity' ? '#2a4d3a' : '#30475e')}
-                    emissiveIntensity={active ? 1.5 : 0.5}
-                    transparent={!active}
-                    opacity={active ? 1.0 : 0.8}
+                    color={color}
+                    emissive={color}
+                    emissiveIntensity={active || (isGameOver && shouldBeOn && !active) ? 1.5 : 0.5}
+                    transparent={!active && !(isGameOver && shouldBeOn)}
+                    opacity={(active || (isGameOver && shouldBeOn && !active)) ? 1.0 : 0.8}
                 />
             </mesh>
             {/* Cell Border/Outline */}

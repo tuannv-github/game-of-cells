@@ -1,8 +1,14 @@
 import React, { useState } from 'react';
-import { Hexagon, Layers, Activity, Eye, EyeOff, Save, Upload, UploadCloud, DownloadCloud, X, Trash2 } from 'lucide-react';
+import { Hexagon, Layers, Activity, Eye, EyeOff, Save, Upload, UploadCloud, DownloadCloud, X, Trash2, Undo } from 'lucide-react';
 import { remoteLog } from '../utils/logger';
 
-const Sidebar = ({ config, setConfig, onGenerate, onStep, onHint, onSave, onLoad, onSaveServer, onLoadServer, onDeleteServer, onReset, mapList, onFetchMaps, currentStep, layerVisibility, setLayerVisibility }) => {
+const Sidebar = ({
+    config, setConfig, onGenerate, onStep, onHint,
+    onSave, onLoad, onSaveServer, onLoadServer, onDeleteServer,
+    onReset, onRestart, onUndo, mapList, onFetchMaps, currentStep,
+    layerVisibility, setLayerVisibility,
+    useBackend, setUseBackend, autoSync, onToggleAutoSync, lastApiStepResult
+}) => {
     const [showMapList, setShowMapList] = useState(false);
 
     const handleConfigChange = (key, value) => {
@@ -50,6 +56,12 @@ const Sidebar = ({ config, setConfig, onGenerate, onStep, onHint, onSave, onLoad
                 </button>
                 <button className="btn btn-primary" onClick={onStep}>
                     NEXT STEP
+                </button>
+                <button className="btn btn-primary" onClick={onRestart} style={{ backgroundColor: '#ffc107', color: '#000' }}>
+                    RESTART
+                </button>
+                <button className="btn btn-outline" onClick={onUndo} title="Undo Last Step" style={{ borderColor: '#a855f7', color: '#a855f7' }}>
+                    <Undo size={16} />
                 </button>
                 <div className="btn-group">
                     <button className="btn btn-outline" onClick={onSave} title="Save to Local">
@@ -175,6 +187,53 @@ const Sidebar = ({ config, setConfig, onGenerate, onStep, onHint, onSave, onLoad
             <div className="separator" />
 
             <div className="config-section">
+                <section style={{ background: '#1c2128', padding: '12px', borderRadius: '8px', border: '1px solid #444c56', marginBottom: '16px' }}>
+                    <h3 style={{ color: '#4db8ff', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                        <Activity size={18} /> API Client Integration
+                    </h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px', background: '#0d1117', borderRadius: '4px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 'bold', color: useBackend ? '#ffc107' : '#8b949e' }}>
+                                BACKEND ENGINE MODE
+                            </span>
+                            <input
+                                type="checkbox"
+                                checked={useBackend}
+                                onChange={(e) => setUseBackend(e.target.checked)}
+                            />
+                        </div>
+
+                        <button
+                            className={`btn ${autoSync ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={onToggleAutoSync}
+                            style={{ justifyContent: 'center', width: '100%', fontSize: '12px' }}
+                        >
+                            {autoSync ? 'STOP AUTO-SYNC' : 'START AUTO-SYNC (POLL)'}
+                        </button>
+
+                        {lastApiStepResult && (
+                            <div style={{
+                                marginTop: '8px',
+                                padding: '8px',
+                                background: '#0d1117',
+                                borderLeft: `3px solid ${lastApiStepResult.failure ? '#f85149' : '#3fb950'}`,
+                                fontSize: '11px'
+                            }}>
+                                <div style={{ color: '#8b949e', marginBottom: '4px' }}>Latest API Play Result:</div>
+                                <div style={{ color: '#c9d1d9' }}>Energy: <span style={{ color: '#4db8ff' }}>{lastApiStepResult.energyConsumed?.toFixed(2)}</span></div>
+                                {lastApiStepResult.failure && (
+                                    <div style={{ color: '#f85149', fontWeight: 'bold', marginTop: '4px' }}>
+                                        FAILURE: {lastApiStepResult.failure}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        <div style={{ fontSize: '10px', color: '#8b949e', fontStyle: 'italic', marginTop: '4px' }}>
+                            Syncs UI with Swagger API simulation state.
+                        </div>
+                    </div>
+                </section>
+
                 <section>
                     <h3><Layers size={16} /> World Geometry</h3>
                     <div className="config-group">

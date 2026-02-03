@@ -1,0 +1,410 @@
+import express from 'express';
+import cors from 'cors';
+import bodyParser from 'body-parser';
+import swaggerJsDoc from 'swagger-jsdoc';
+import swaggerUi from 'swagger-ui-express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { DEFAULT_CONFIG } from './src/config.js';
+import { generateWorld } from './src/engine/generation.js';
+import { moveMinion, evaluateCoverage } from './src/engine/simulation.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const port = 40001;
+
+// Configuration
+const LOG_DIR = path.resolve(__dirname, 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'server.log');
+const SCENARIOS_DIR = path.resolve(__dirname, 'scenarios');
+
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+if (!fs.existsSync(SCENARIOS_DIR)) fs.mkdirSync(SCENARIOS_DIR, { recursive: true });
+
+app.use(cors());
+app.use(bodyParser.json());
+
+// Game state
+let currentConfig = { ...DEFAULT_CONFIG };
+let isGameOver = false;
+
+const writeToLogFile = (message, level = 'info') => {
+    const timestamp = new Date().toISOString();
+    const logEntry = `[${timestamp}] [${level.toUpperCase()}] ${message}\n`;
+    fs.appendFileSync(LOG_FILE, logEntry);
+};
+
+// Swagger Definition
+const swaggerOptions = {
+    swaggerDefinition: {
+        openapi: '3.0.0',
+        info: {
+            title: 'Game of Cells API',
+            version: '1.0.0',
+            description: 'API for controlling and playing the Game of Cells simulation'
+        }
+    },
+    apis: ['./server.js']
+};
+
+const swaggerDocs = swaggerJsDoc(swaggerOptions);
+
+// Custom Swagger setup with dynamic server URL
+app.use('/api-docs', swaggerUi.serve, (req, res, next) => {
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const dynamicSwaggerDocs = {
+        ...swaggerDocs,
+        servers: [
+            {
+                url: `${protocol}://${host}`,
+                description: 'Current server'
+            }
+        ]
+    };
+    swaggerUi.setup(dynamicSwaggerDocs)(req, res, next);
+});
+
+// Serve OpenAPI JSON specification
+app.get('/docs/openapi.json', (req, res) => {
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const dynamicSwaggerDocs = {
+        ...swaggerDocs,
+        servers: [
+            {
+                url: `${protocol}://${host}`,
+                description: 'Current server'
+            }
+        ]
+    };
+    res.json(dynamicSwaggerDocs);
+});
+
+// Redirect /docs to /api-docs
+app.get('/docs', (req, res) => {
+    res.redirect('/api-docs');
+});
+
+
+/**
+ * @openapi
+ * /api/config:
+ *   get:
+ *     summary: Get current game configuration
+ *     responses:
+ *       200:
+ *         description: Current configuration
+ *   post:
+ *     summary: Update game configuration
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Config updated
+ */
+
+app.get('/api/config', (req, res) => {
+    res.json(currentConfig);
+});
+
+app.post('/api/config', (req, res) => {
+    currentConfig = { ...currentConfig, ...req.body };
+    res.json(currentConfig);
+});
+
+/**
+ * @openapi
+ * /api/maps:
+ *   get:
+ *     summary: List all saved scenarios
+ *     responses:
+ *       200:
+ *         description: List of filenames
+ *   post:
+ *     summary: Save a new scenario
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               data:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Scenario saved
+ */
+app.get('/api/maps', (req, res) => {
+    const files = fs.readdirSync(SCENARIOS_DIR).filter(f => f.endsWith('.json'));
+    res.json(files);
+});
+
+app.post('/api/maps', (req, res) => {
+    const { name, data } = req.body;
+    const filename = name || `scenario_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const filePath = path.join(SCENARIOS_DIR, filename);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    res.json({ success: true, filename });
+});
+
+/**
+ * @openapi
+ * /api/maps/{name}:
+ *   get:
+ *     summary: Get a specific scenario
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Scenario data
+ *       404:
+ *         description: Not found
+ *   delete:
+ *     summary: Delete a specific scenario
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Deleted
+ *       404:
+ *         description: Not found
+ */
+app.get('/api/maps/:name', (req, res) => {
+    const filePath = path.join(SCENARIOS_DIR, req.params.name);
+    if (fs.existsSync(filePath)) {
+        res.json(JSON.parse(fs.readFileSync(filePath, 'utf-8')));
+    } else {
+        res.status(404).send('Not found');
+    }
+});
+
+app.delete('/api/maps/:name', (req, res) => {
+    const filePath = path.join(SCENARIOS_DIR, req.params.name);
+    if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        res.json({ success: true });
+    } else {
+        res.status(404).send('Not found');
+    }
+});
+
+/**
+ * @openapi
+ * /api/generate:
+ *   post:
+ *     summary: Generate a new scenario based on current config
+ *     responses:
+ *       200:
+ *         description: New scenario state
+ */
+app.post('/api/generate', (req, res) => {
+    const result = generateWorld(currentConfig, null, true, {
+        log: (m) => writeToLogFile(m, 'info'),
+        warn: (m) => writeToLogFile(m, 'warn'),
+        error: (m) => writeToLogFile(m, 'error')
+    });
+    // Autosave for frontend sync
+    const autosavePath = path.join(SCENARIOS_DIR, 'autosave.json');
+    fs.writeFileSync(autosavePath, JSON.stringify(result, null, 2));
+    res.json(result);
+});
+
+/**
+ * @openapi
+ * /api/step:
+ *   post:
+ *     summary: Execute a simulation step
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               worldState:
+ *                 type: object
+ *               physicalMap:
+ *                 type: object
+ *               toggleOn:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               toggleOff:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Result of the step
+ */
+app.post('/api/step', (req, res) => {
+    // Check if game is already over
+    if (isGameOver) {
+        return res.json({
+            result: 'failure',
+            msg: 'Game over',
+            worldState: req.body.worldState,
+            gameOver: true
+        });
+    }
+
+    const { worldState, physicalMap, toggleOn = [], toggleOff = [], totalEnergyConsumed = 0 } = req.body;
+
+    // 1. Apply overrides
+    const newLevels = worldState.levels.map(level => ({
+        ...level,
+        cells: level.cells.map(cell => {
+            if (toggleOn.includes(cell.id)) return { ...cell, active: true };
+            if (toggleOff.includes(cell.id)) return { ...cell, active: false };
+            return cell;
+        })
+    }));
+
+    // 2. Move Minions
+    const movedMinions = worldState.minions.map(m =>
+        moveMinion(m, currentConfig, physicalMap)
+    );
+
+    // 3. Evaluate Coverage
+    const { minionStates, energyConsumed, failure, cellsShouldBeOn } = evaluateCoverage(
+        movedMinions,
+        newLevels,
+        currentConfig,
+        {
+            log: (m) => writeToLogFile(m, 'info'),
+            warn: (m) => writeToLogFile(m, 'warn'),
+            error: (m) => writeToLogFile(m, 'error')
+        }
+    );
+
+    // 4. Calculate cumulative energy
+    const newTotalEnergyConsumed = totalEnergyConsumed + energyConsumed;
+    const energyLeft = currentConfig.TOTAL_ENERGY - newTotalEnergyConsumed;
+
+    // Determine result and message
+    let result, msg;
+    if (failure) {
+        result = 'failure';
+        msg = failure;
+    } else if (energyLeft <= 0) {
+        result = 'failure';
+        msg = 'Game over: Out of energy';
+    } else {
+        result = 'success';
+        msg = 'Step completed successfully';
+    }
+
+    const responseData = {
+        result,
+        msg,
+        worldState: { levels: newLevels, minions: minionStates },
+        gameOver: result === 'failure'
+    };
+
+    // Set game over flag
+    if (result === 'failure') {
+        isGameOver = true;
+        // Include cells that should be on when game is over
+        responseData.cellsShouldBeOn = cellsShouldBeOn;
+    }
+
+    // Include energy info only on success
+    if (result === 'success') {
+        responseData.energyConsumed = energyConsumed;
+        responseData.totalEnergyConsumed = newTotalEnergyConsumed;
+        responseData.energyLeft = energyLeft;
+    }
+
+    res.json(responseData);
+});
+
+/**
+ * @openapi
+ * /api/restart:
+ *   post:
+ *     summary: Restart the game after game over
+ *     description: Resets the game over flag and generates a new world
+ *     responses:
+ *       200:
+ *         description: Game restarted successfully
+ */
+app.post('/api/restart', (req, res) => {
+    isGameOver = false;
+
+    // Read the current autosave to get the initial map
+    const autosavePath = path.join(SCENARIOS_DIR, 'autosave.json');
+
+    if (!fs.existsSync(autosavePath)) {
+        return res.status(404).json({
+            result: 'failure',
+            msg: 'No saved game found to restart'
+        });
+    }
+
+    const savedState = JSON.parse(fs.readFileSync(autosavePath, 'utf-8'));
+
+    // Reset the world state to initial positions (keep the same map)
+    const { worldState, physicalMap, config: savedConfig } = savedState;
+
+    // Update autosave with reset energy
+    const fullState = {
+        worldState,
+        physicalMap,
+        config: savedConfig || currentConfig,
+        totalEnergyConsumed: 0,
+        mapRadius: savedState.mapRadius,
+        lastResult: null
+    };
+    fs.writeFileSync(autosavePath, JSON.stringify(fullState, null, 2));
+
+    res.json({
+        result: 'success',
+        msg: 'Game restarted with current map',
+        worldState,
+        physicalMap,
+        mapRadius: savedState.mapRadius
+    });
+});
+
+/**
+ * @openapi
+ * /api/state:
+ *   get:
+ *     summary: Get the latest simulation state (autosave)
+ *     responses:
+ *       200:
+ *         description: Current state
+ */
+app.get('/api/state', (req, res) => {
+    const autosavePath = path.join(SCENARIOS_DIR, 'autosave.json');
+    if (fs.existsSync(autosavePath)) {
+        const data = JSON.parse(fs.readFileSync(autosavePath, 'utf-8'));
+        res.json(data);
+    } else {
+        res.json({ worldState: null, physicalMap: null, config: currentConfig });
+    }
+});
+
+app.listen(port, () => {
+    console.log(`Server running at http://localhost:${port}`);
+    console.log(`Swagger UI available at http://localhost:${port}/api-docs`);
+});

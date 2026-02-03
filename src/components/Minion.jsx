@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text, Float } from '@react-three/drei';
 
-const Minion = ({ position, type, color, label, size = 1.0 }) => {
+const Minion = ({ position, type, color, label, size = 1.0, isUncovered = false }) => {
     const meshRef = useRef();
 
     React.useEffect(() => {
@@ -13,6 +13,24 @@ const Minion = ({ position, type, color, label, size = 1.0 }) => {
         if (meshRef.current) {
             // Subtle hovering animation (relative to the group)
             meshRef.current.position.y = Math.sin(state.clock.elapsedTime * 2) * 0.1;
+
+            // Blinking logic for uncovered state
+            const mat = meshRef.current.material;
+            if (mat) {
+                if (isUncovered) {
+                    const t = state.clock.elapsedTime * Math.PI * 2; // 1 blink per second
+                    const isRed = Math.sin(t) > 0;
+                    const blinkColor = isRed ? '#ff0000' : '#000000';
+                    mat.color.set(blinkColor);
+                    mat.emissive.set(blinkColor);
+                    mat.emissiveIntensity = 2.0;
+                } else {
+                    // Reset to normal properties
+                    mat.color.set(color);
+                    mat.emissive.set(color);
+                    mat.emissiveIntensity = 0.5;
+                }
+            }
         }
     });
 
@@ -38,7 +56,7 @@ const Minion = ({ position, type, color, label, size = 1.0 }) => {
             <Text
                 position={[0, size * 1.5, 0]}
                 fontSize={size * 0.6}
-                color="white"
+                color={isUncovered ? "#ff0000" : "white"}
                 anchorX="center"
                 anchorY="middle"
             >
