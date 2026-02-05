@@ -658,8 +658,9 @@ app.post('/api/player/step', (req, res) => {
     }));
 
     // 2. Move Minions
+    const simLogger = { log: (m) => writeToLogFile(m, 'info') };
     const movedMinions = scenarioState.minions.map(m =>
-        moveMinion(m, configToUse, physicalMap, newLevels)
+        moveMinion(m, configToUse, physicalMap, newLevels, simLogger)
     );
 
     // 3. Evaluate Coverage
@@ -943,7 +944,7 @@ app.post('/api/player/change-difficulty', (req, res) => {
  *   post:
  *     tags: [Player]
  *     summary: Initialize player scenario (create dir, copy easy if new user, load into server)
- *     description: Loads initial scenario. Auth optional: logged-in users get their saved state; unauthenticated get easy.json.
+ *     description: "Loads initial scenario. Auth optional - logged-in users get their saved state; unauthenticated get easy.json."
  *     responses:
  *       200:
  *         description: Scenario loaded and ready to play
@@ -1081,16 +1082,27 @@ app.post('/api/undo', (req, res) => {
     if (!auth || (auth.type !== 'user' && auth.type !== 'guest')) {
         return res.status(401).json({ msg: 'Authentication required for undo' });
     }
-    if (currentStep === 0) {
+
+    const stepsDir = auth.type === 'user'
+        ? path.join(getPlayerScenariosDir(auth.username), 'steps')
+        : path.join(ensureGuestScenario(auth.guestId), 'steps');
+    if (!fs.existsSync(stepsDir)) {
+        return res.status(400).json({ msg: 'No previous state to undo to' });
+    }
+
+    // Derive current step from step files on disk (not in-memory) so undo works after loading from file
+    const stepFiles = fs.readdirSync(stepsDir).filter(f => /^step_\d+\.json$/.test(f));
+    const stepNums = stepFiles.map(f => parseInt(f.replace('step_', '').replace('.json', ''), 10));
+    const latestStepNum = stepNums.length > 0 ? Math.max(...stepNums) : -1;
+
+    if (latestStepNum <= 0) {
         return res.status(400).json({
             msg: 'No previous state to undo to'
         });
     }
 
-    const stepsDir = auth.type === 'user'
-        ? path.join(getPlayerScenariosDir(auth.username), 'steps')
-        : path.join(ensureGuestScenario(auth.guestId), 'steps');
-    const prevStepPath = path.join(stepsDir, `step_${currentStep - 1}.json`);
+    const prevStepNum = latestStepNum - 1;
+    const prevStepPath = path.join(stepsDir, `step_${prevStepNum}.json`);
     if (!fs.existsSync(prevStepPath)) {
         return res.status(400).json({
             msg: 'No previous step file found to undo to'
@@ -1098,10 +1110,10 @@ app.post('/api/undo', (req, res) => {
     }
 
     // Remove latest step file (the one we're undoing from)
-    const latestToRemove = path.join(stepsDir, `step_${currentStep}.json`);
+    const latestToRemove = path.join(stepsDir, `step_${latestStepNum}.json`);
     if (fs.existsSync(latestToRemove)) {
         fs.unlinkSync(latestToRemove);
-        writeToLogFile(`[UNDO] Removed step_${currentStep}.json for ${auth.type === 'user' ? auth.username : `guest:${auth.guestId}`}`, 'info');
+        writeToLogFile(`[UNDO] Removed step_${latestStepNum}.json for ${auth.type === 'user' ? auth.username : `guest:${auth.guestId}`}`, 'info');
     }
 
     // Load previous state from file
@@ -1116,7 +1128,7 @@ app.post('/api/undo', (req, res) => {
 
     isGameOver = !!(previousState.lastResult?.gameOver || previousState.lastResult?.failure);
     lastGameOverMsg = previousState.lastResult?.msg || '';
-    currentStep = previousState.currentStep ?? (currentStep - 1);
+    currentStep = previousState.currentStep ?? prevStepNum;
 
     // Build lastResult with energy info for the restored state
     const lastResult = {

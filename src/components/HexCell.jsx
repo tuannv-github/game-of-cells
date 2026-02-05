@@ -65,10 +65,10 @@ const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = 
                 <lineBasicMaterial color={active ? "white" : "#ffffff"} transparent opacity={active ? 0.8 : 0.3} />
             </lineSegments>
 
-            {/* Coverage Boundary (Visible if active or explicitly requested) */}
+            {/* Coverage Boundary (circle; hex cell body is illustration only) */}
             {(showCoverage || active) && (
                 <mesh rotation={[-Math.PI / 2, 0, Math.PI / 6]} position={[0, -0.05, 0]}>
-                    <ringGeometry args={[serviceRadius - 0.5, serviceRadius, 6]} />
+                    <ringGeometry args={[serviceRadius - 0.5, serviceRadius, 32]} />
                     <meshBasicMaterial
                         color={color}
                         transparent

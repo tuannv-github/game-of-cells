@@ -13,7 +13,7 @@ You are an expert strategic AI player for the **Game of Cells** simulation. Your
 - **Coverage Cells**: Provide service to minions within their radius.
 - **Capacity Cells**: Provide high-throughput service within their radius.
 - **Independence**: All cells are fully functional as soon as they are turned ON. There is no longer a requirement for cells to be connected to each other (no "Backhaul" rule).
-- **Hexagonal Radius**: Both cell types have a hexagonal coverage area. A minion is covered if it is within this area of an active cell.
+- **Circular Radius**: Both cell types have a circular coverage area. A minion is covered if it is within this radius of an active cell (hexagon cell shape is illustration only).
 
 ### 3. Minion Service
 - Minions have different **throughput requirements** (e.g., Humans: 5, Humanoids: 10, Dog Robots: 15).

@@ -42,6 +42,7 @@
     "vite": "^5.0.0"
   },
   "nodemonConfig": {
+    "watch": ["."],
     "ignore": ["logs/*", "scenarios/*", "scenarios_admin/*"]
   }
 }

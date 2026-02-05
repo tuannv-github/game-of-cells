@@ -570,7 +570,7 @@ const GameApp = () => {
         }
 
         const { minionStates, failure } = evaluateCoverage(scenarioState.minions, scenarioState.levels, config);
-        const movedMinions = minionStates.map(m => moveMinion(m, config, physicalMap));
+        const movedMinions = minionStates.map(m => moveMinion(m, config, physicalMap, scenarioState.levels));
 
         setScenarioState(prev => ({ ...prev, minions: movedMinions }));
         setCurrentStep(prev => prev + 1);

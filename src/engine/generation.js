@@ -304,17 +304,13 @@ export const generateScenario = (config, physicalMap = null, resetMap = true, lo
                 }
                 if (insideExclusion) continue;
 
-                // 2. Coverage Check (Must be in at least 1 cell)
+                // 2. Coverage Check (Must be in at least 1 cell) — circle
                 const coveringCells = levelCells.filter(cell => {
-                    const dx = Math.abs(mx - cell.x);
-                    const dz = Math.abs(mz - cell.z);
+                    const dx = mx - cell.x;
+                    const dz = mz - cell.z;
                     const radius = cell.type === CELL_TYPES.COVERAGE ? covSpacing : capSpacing;
-
-                    // Hexagonal check to match simulation
-                    // 1. |z| < radius
-                    // 2. sqrt(3)/2 * |x| + 0.5 * |z| < radius
-                    const diag = (Math.sqrt(3) / 2) * dx + 0.5 * dz;
-                    return dz < radius && diag < radius && dx < radius * (Math.sqrt(3) / 2);
+                    const dist = Math.sqrt(dx * dx + dz * dz);
+                    return dist < radius;
                 });
 
                 if (coveringCells.length > 0) {

@@ -2,11 +2,15 @@ import { MINION_TYPES } from '../config.js';
 import { remoteLog } from '../utils/logger.js';
 
 // Helper for random movement within constraints
-// For each minion: generate random movement (within max), validate, retry up to 10 times; if no valid move, don't move
-export const moveMinion = (minion, config, physicalMap, activeLevels = null) => {
+// For each minion: generate random movement (within max), validate, retry up to 10 times.
+// If no valid move found: keep old position (minion stays put).
+export const moveMinion = (minion, config, physicalMap, activeLevels = null, logger = null) => {
+    const log = logger?.log ? (m) => logger.log(m) : (typeof remoteLog !== 'undefined' ? remoteLog : () => {});
     const { type, x, z, level } = minion;
     const maxMove = config[type.toUpperCase()]?.MAX_MOVE ?? 1;
     const MAX_ATTEMPTS = 10;
+
+    log(`[SIM] moveMinion: ${minion.id} trying from (${x.toFixed(1)}, ${z.toFixed(1)}) level ${level} maxMove=${maxMove}`);
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         // Random angle and distance
@@ -70,6 +74,7 @@ export const moveMinion = (minion, config, physicalMap, activeLevels = null) => 
                     if (Math.abs(newX - zone.x) < (halfSize + mHalf) &&
                         Math.abs(newZ - zone.z) < (halfSize + mHalf)) {
                         isMoveValid = false;
+                        log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: exclusion zone at (${zone.x?.toFixed(1)}, ${zone.z?.toFixed(1)})`);
                         break;
                     }
                 }
@@ -85,46 +90,44 @@ export const moveMinion = (minion, config, physicalMap, activeLevels = null) => 
             : targetLevelData?.cells;
 
         if (levelCells && levelCells.length > 0) {
-            // Safety margin: use 99.99% of radius to fix (1) moves into inactive-only edge zones
-            // and (2) floating-point boundary edge cases, without rejecting valid moves
-            const MOVE_SAFETY_MARGIN = 0.9999;
+            // Use same radius as coverage evaluation so valid moves are never out of service
             let isCovered = false;
+            let minDist = Infinity;
+            let nearestCellId = null;
+            let nearestRadius = 0;
             for (const cell of levelCells) {
                 const dx = newX - cell.x;
                 const dz = newZ - cell.z;
-                const fullRadius = (cell.type === 'coverage' ? config.COVERAGE_CELL_RADIUS : config.CAPACITY_CELL_RADIUS);
-                const radius = fullRadius * MOVE_SAFETY_MARGIN;
-                const qx = Math.abs(dx);
-                const qz = Math.abs(dz);
-                const diag = (Math.sqrt(3) / 2) * qx + 0.5 * qz;
-
-                if (qz < radius && diag < radius && qx < radius * (Math.sqrt(3) / 2)) {
+                const radius = cell.type === 'coverage' ? config.COVERAGE_CELL_RADIUS : config.CAPACITY_CELL_RADIUS;
+                const dist = Math.sqrt(dx * dx + dz * dz);
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearestCellId = cell.id;
+                    nearestRadius = radius;
+                }
+                if (dist < radius) {
                     isCovered = true;
                     break;
                 }
             }
-            if (!isCovered) isMoveValid = false;
-        } else {
-            // If no cells exist at all on level, does it count as valid?
-            // Usually implies failure if constraints are strict
-            if (activeLevels || (targetLevelData?.cells?.length > 0)) {
+            if (!isCovered) {
                 isMoveValid = false;
+                log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: outside coverage (${newX.toFixed(1)}, ${newZ.toFixed(1)}) nearest ${nearestCellId} dist=${minDist.toFixed(2)} radius=${nearestRadius}`);
             }
-            // If completely empty map, allow?
-            // Keep existing fallback: if (!targetLevelData || ...) isValid=true
+        } else {
+            // No cells to validate against: reject move (e.g. level not found, or physicalMap has no cells)
+            isMoveValid = false;
+            log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: no cells for level ${newLevel}`);
         }
 
         if (isMoveValid) {
-            // Apply bounds check just in case
-            const mapSize = 100;
-            if (Math.abs(newX) > mapSize) newX = x; // Reset if out of bounds (shouldn't happen with coverage check)
-            if (Math.abs(newZ) > mapSize) newZ = z;
-
+            log(`[SIM] moveMinion: ${minion.id} moved (${x.toFixed(1)}, ${z.toFixed(1)}) -> (${newX.toFixed(1)}, ${newZ.toFixed(1)}) level ${newLevel}`);
             return { ...minion, x: newX, z: newZ, level: newLevel };
         }
     }
 
-    // Failed to find valid move after MAX_ATTEMPTS retries: don't move
+    // No valid move found: keep old position (back to old position)
+    log(`[SIM] moveMinion: ${minion.id} back to old position (${x.toFixed(1)}, ${z.toFixed(1)}) - no valid move after ${MAX_ATTEMPTS} attempts`);
     return { ...minion };
 };
 
@@ -170,18 +173,13 @@ export const evaluateCoverage = (minions, levels, config, logger) => {
         if (log.log) log.log(`[SIM] Assigned Minion ${minion.id} (${minion.type}) to Cell ${cell.id} (Load: ${load})`);
     };
 
-    // Helper: Is Minion Covered by Cell? (Hex Check)
+    // Helper: Is Minion Covered by Cell? (Circle)
     const isMinionCoveredByCell = (m, c) => {
         const dx = m.x - c.x;
         const dz = m.z - c.z;
         const radius = c.type === 'capacity' ? config.CAPACITY_CELL_RADIUS : config.COVERAGE_CELL_RADIUS;
-
-        // Hex Check
-        const qx = Math.abs(dx);
-        const qz = Math.abs(dz);
-        const diag = (Math.sqrt(3) / 2) * qx + 0.5 * qz;
-
-        return qz < radius && diag < radius && qx < radius * (Math.sqrt(3) / 2);
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        return dist < radius;
     };
 
     if (log.log) log.log(`[SIM] Evaluating Coverage for ${minions.length} minions...`);
