@@ -1,6 +1,38 @@
 import { MINION_TYPES } from '../config.js';
 import { remoteLog } from '../utils/logger.js';
 
+/**
+ * Check if two line segments intersect (excluding parallel/collinear edge cases).
+ * Seg1: (x1,z1) -> (x2,z2), Seg2: (x3,z3) -> (x4,z4)
+ */
+const segmentsIntersect = (x1, z1, x2, z2, x3, z3, x4, z4) => {
+    const dx1 = x2 - x1, dz1 = z2 - z1;
+    const dx2 = x4 - x3, dz2 = z4 - z3;
+    const det = dx1 * dz2 - dx2 * dz1;
+    if (Math.abs(det) < 1e-10) return false; // parallel
+    const t = (dx1 * (z3 - z1) - dz1 * (x3 - x1)) / det;
+    const s = (dx2 * (z1 - z3) - dz2 * (x1 - x3)) / (-det);
+    return s >= 0 && s <= 1 && t >= 0 && t <= 1;
+};
+
+/**
+ * Check if line segment (x1,z1)->(x2,z2) intersects axis-aligned rectangle
+ * centered at (cx,cz) with half-size h (bounds [cx-h,cx+h] x [cz-h,cz+h]).
+ */
+const segmentIntersectsRect = (x1, z1, x2, z2, cx, cz, halfSize) => {
+    const xMin = cx - halfSize, xMax = cx + halfSize;
+    const zMin = cz - halfSize, zMax = cz + halfSize;
+    // Check intersection with each of the 4 edges
+    if (segmentsIntersect(x1, z1, x2, z2, xMin, zMin, xMax, zMin)) return true; // bottom
+    if (segmentsIntersect(x1, z1, x2, z2, xMax, zMin, xMax, zMax)) return true; // right
+    if (segmentsIntersect(x1, z1, x2, z2, xMax, zMax, xMin, zMax)) return true; // top
+    if (segmentsIntersect(x1, z1, x2, z2, xMin, zMax, xMin, zMin)) return true; // left
+    // Also reject if segment is fully inside (both endpoints inside rect)
+    const p1Inside = x1 > xMin && x1 < xMax && z1 > zMin && z1 < zMax;
+    const p2Inside = x2 > xMin && x2 < xMax && z2 > zMin && z2 < zMax;
+    return p1Inside || p2Inside;
+};
+
 // Helper for random movement within constraints
 // For each minion: generate random movement (within max), validate, retry up to 10 times.
 // If no valid move found: keep old position (minion stays put).
@@ -61,9 +93,27 @@ export const moveMinion = (minion, config, physicalMap, activeLevels = null, log
         let isMoveValid = true;
         const targetLevelData = physicalMap?.levels?.find(l => l.id === newLevel);
 
-        // 1. Check Exclusion Zones
+        // 0. Check path collision: straight line from (x,z) to (newX,newZ) must not intersect obstacles
+        const typeKey = type.toUpperCase();
+        const levelsToCheck = level === newLevel ? [level] : [level, newLevel];
+        for (const lvlId of levelsToCheck) {
+            const lvlData = physicalMap?.levels?.find(l => l.id === lvlId);
+            const exclusionList = lvlData?.type_exclusion_zones?.[typeKey] || lvlData?.type_exclusion_zones?.[type] || [];
+            for (const zone of exclusionList) {
+                const halfSize = zone.size / 2;
+                if (segmentIntersectsRect(x, z, newX, newZ, zone.x, zone.z, halfSize)) {
+                    isMoveValid = false;
+                    log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: path intersects obstacle at (${zone.x?.toFixed(1)}, ${zone.z?.toFixed(1)})`);
+                    break;
+                }
+            }
+            if (!isMoveValid) break;
+        }
+
+        if (!isMoveValid) continue;
+
+        // 1. Check Exclusion Zones (destination inside obstacle)
         if (targetLevelData && targetLevelData.type_exclusion_zones) {
-            const typeKey = type.toUpperCase();
             const exclusionList = targetLevelData.type_exclusion_zones[typeKey] || targetLevelData.type_exclusion_zones[type] || [];
             const minionSize = config[typeKey]?.SIZE || 1.0;
             const mHalf = minionSize / 2;

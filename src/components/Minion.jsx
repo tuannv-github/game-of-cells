@@ -9,7 +9,7 @@ const TRAIL_SEGMENTS = 12;
 // Spring config: meteor-like (fast start, smooth deceleration, no bounce)
 const METEOR_CONFIG = { mass: 1, tension: 180, friction: 24, precision: 0.0001 };
 
-const Minion = ({ position, type, color, label, size = 1.0, isUncovered = false, maxMove = 6, showRange = true }) => {
+const Minion = ({ position, type, color, label, size = 1.0, isUncovered = false, maxMove = 6, showRange = true, currentStep = 0 }) => {
     const meshRef = useRef();
     const groupRef = useRef();
     const startPos = useRef(new THREE.Vector3(position[0], position[1], position[2]));
@@ -27,18 +27,32 @@ const Minion = ({ position, type, color, label, size = 1.0, isUncovered = false,
     useEffect(() => {
         const [x, y, z] = position;
         const dist = Math.hypot(x - startPos.current.x, y - startPos.current.y, z - startPos.current.z);
-        if (dist > 0.01) {
+        const isRestart = currentStep === 0;
+        if (isRestart || dist <= 0.01) {
+            isMoving.current = false;
+            startPos.current.set(x, y, z);
+            api.start({ position: [x, y, z], immediate: true });
+        } else {
             isMoving.current = true;
             startPos.current.set(springs.position.get()[0], springs.position.get()[1], springs.position.get()[2]);
             api.start({ position: [x, y, z] });
-        } else {
-            startPos.current.set(x, y, z);
-            api.start({ position: [x, y, z], immediate: true });
         }
-    }, [position[0], position[1], position[2], api]);
+    }, [position[0], position[1], position[2], currentStep, api]);
 
     const trailLineRef = useRef();
     const trailPoints = useMemo(() => new Float32Array((TRAIL_SEGMENTS + 1) * 3), []);
+
+    // Clear trail on restart (currentStep resets to 0)
+    useEffect(() => {
+        if (currentStep === 0) {
+            isMoving.current = false;
+            trailPoints.fill(0);
+            if (trailLineRef.current?.geometry) {
+                trailLineRef.current.geometry.setAttribute('position', new THREE.BufferAttribute(trailPoints, 3));
+                trailLineRef.current.geometry.attributes.position.needsUpdate = true;
+            }
+        }
+    }, [currentStep]);
 
     useFrame(() => {
         const g = groupRef.current;

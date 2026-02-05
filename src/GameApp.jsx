@@ -911,6 +911,7 @@ const GameApp = () => {
                                                     isUncovered={!minion.covered}
                                                     maxMove={config[minion.type.toUpperCase()]?.MAX_MOVE ?? 6}
                                                     showRange={layerVisibility.minionRange}
+                                                    currentStep={currentStep}
                                                 />
                                             ))}
                                     </group>

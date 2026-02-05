@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DIFFICULTY_PRESETS } from '../config';
+import { DIFFICULTY_PRESETS, MINION_TYPES } from '../config';
 import { Hexagon, Layers, Activity, Eye, EyeOff, Save, Upload, UploadCloud, DownloadCloud, X, Trash2, LogOut, Zap, ChevronDown, ChevronRight } from 'lucide-react';
 import TokenPanel from './TokenPanel';
 import { remoteLog } from '../utils/logger';
@@ -351,6 +351,13 @@ const AdminPanel = ({
                         <span className="swatch" style={{ background: '#2a4d3a', border: '1px solid #ffffff44', width: '14px', height: '14px', borderRadius: '4px', flexShrink: 0 }}></span>
                         <span>Capacity (OFF)</span>
                     </div>
+                    <div style={{ margin: '8px 0', height: '1px', background: '#30363d', opacity: 0.5 }} />
+                    {Object.entries(MINION_TYPES).map(([typeKey]) => (
+                        <div key={typeKey} className="legend-item" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
+                            <span className="swatch" style={{ background: config[typeKey]?.COLOR ?? '#888', width: '14px', height: '14px', borderRadius: '4px', flexShrink: 0 }}></span>
+                            <span>{typeKey.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}</span>
+                        </div>
+                    ))}
                 </div>
             </div>
         </div>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Activity, Eye, EyeOff, Save, Upload, UploadCloud, DownloadCloud, X, Undo, LogOut, RefreshCw } from 'lucide-react';
 import TokenPanel from './TokenPanel';
-import { DIFFICULTY_PRESETS } from '../config';
+import { DIFFICULTY_PRESETS, MINION_TYPES } from '../config';
 import { remoteLog } from '../utils/logger';
 import LoginForm from './LoginForm';
 
@@ -170,18 +170,12 @@ const PlayerPanel = ({
                         <span>Capacity Cell (OFF)</span>
                     </div>
                     <div style={{ margin: '8px 0', height: '1px', background: '#30363d', opacity: 0.5 }} />
-                    <div className="legend-item" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
-                        <span className="swatch" style={{ background: '#00d2ff', border: '1px solid #ffffff44', width: '14px', height: '14px', borderRadius: '4px', flexShrink: 0 }}></span>
-                        <span>Common Area (Hub)</span>
-                    </div>
-                    <div className="legend-item" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
-                        <span className="swatch" style={{ background: '#ff0066', border: '1px solid #ffffff44', width: '14px', height: '14px', borderRadius: '4px', flexShrink: 0 }}></span>
-                        <span>Room Area</span>
-                    </div>
-                    <div className="legend-item" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
-                        <span className="swatch" style={{ background: '#f39c12', border: '1px solid #ffffff44', width: '14px', height: '14px', borderRadius: '4px', flexShrink: 0 }}></span>
-                        <span>Path / Corridor</span>
-                    </div>
+                    {Object.entries(MINION_TYPES).map(([typeKey]) => (
+                        <div key={typeKey} className="legend-item" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
+                            <span className="swatch" style={{ background: config[typeKey]?.COLOR ?? '#888', width: '14px', height: '14px', borderRadius: '4px', flexShrink: 0 }}></span>
+                            <span>{typeKey.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}</span>
+                        </div>
+                    ))}
                 </div>
             </div>
         </div>
