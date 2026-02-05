@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { DIFFICULTY_PRESETS } from '../config';
 import { Hexagon, Layers, Activity, Eye, EyeOff, Save, Upload, UploadCloud, DownloadCloud, X, Trash2, LogOut, Zap, ChevronDown, ChevronRight } from 'lucide-react';
+import TokenPanel from './TokenPanel';
 import { remoteLog } from '../utils/logger';
 import LoginForm from './LoginForm';
 
@@ -9,7 +10,8 @@ const AdminPanel = ({
     onSave, onLoad, onSaveServer, onLoadServer, onDeleteServer,
     onReset, onSaveServerAs, mapList, onFetchMaps,
     layerVisibility, setLayerVisibility,
-    user, isGuest, onLogout, onShowLogin, showLoginModal, onCloseLoginModal, onLoginFromGuest, onRegisterFromGuest
+    user, isGuest, onLogout, onShowLogin, showLoginModal, onCloseLoginModal, onLoginFromGuest, onRegisterFromGuest,
+    tokenPanelProps
 }) => {
     const [showMapList, setShowMapList] = useState(false);
     const [showSavePicker, setShowSavePicker] = useState(false);
@@ -205,6 +207,8 @@ const AdminPanel = ({
                 </div>
             </section>
 
+            {tokenPanelProps && <TokenPanel {...tokenPanelProps} />}
+
             <div className="config-section config-section-compact">
                 <section style={{ ...sectionStyle, marginBottom: '10px' }}>
                     <h3 className="collapsible" style={{ marginTop: 0, marginBottom: expandedSections.global ? '10px' : 0, userSelect: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }} onClick={() => toggleSection('global')}>
@@ -222,8 +226,8 @@ const AdminPanel = ({
                         <input type="range" min="100" max="2000" step="50" value={config.TOTAL_ENERGY} onChange={e => handleConfigChange('TOTAL_ENERGY', parseInt(e.target.value))} />
                     </div>
                     <div className="config-group">
-                        <label>Minion Energy Cost: {config.MINION_ENERGY_COST}</label>
-                        <input type="range" min="0.1" max="5" step="0.1" value={config.MINION_ENERGY_COST} onChange={e => handleConfigChange('MINION_ENERGY_COST', parseFloat(e.target.value))} />
+                        <label>Cell Energy Cost: {config.CELL_ENERGY_COST}</label>
+                        <input type="range" min="0.1" max="5" step="0.1" value={config.CELL_ENERGY_COST} onChange={e => handleConfigChange('CELL_ENERGY_COST', parseFloat(e.target.value))} />
                     </div>
                     </div>
                     )}

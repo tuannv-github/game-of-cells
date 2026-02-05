@@ -21,7 +21,7 @@ Click the **NEXT STEP** button to advance the clock.
 - **Capacity Check**: Coverage Cells must not exceed `COVERAGE_LIMIT_MBPS`.
 
 ### 4️⃣ Step Outcome
-- **Success**: Energy is consumed (`MINION_ENERGY_COST` per Active Cell) and you move to the next step.
+- **Success**: Energy is consumed (`CELL_ENERGY_COST` per active cell) and you move to the next step.
 - **Failure**: If a connection is lost or throughput is exceeded, the simulation terminates (**Game Over**).
 
 - **Victory Condition**: Complete the `TARGET_STEPS` without service failure.
@@ -107,7 +107,7 @@ The **Control Panel** allows adjustment of:
 | Macro | Explanation | Default Value |
 | :--- | :--- | :--- |
 | `TARGET_STEPS` | Total steps required to win. | `100` |
-| `MINION_ENERGY_COST` | Energy per active cell per step. | `1.0` |
+| `CELL_ENERGY_COST` | Energy per active cell per step (minions don't cost energy). | `1.0` |
 | `MAP_LEVELS` | Total vertical floors. | `3` |
 | `COVERAGE_CELLS_COUNT` | Coverage units per level. | `40` |
 | `CAPACITY_CELLS_COUNT` | Capacity units per level. | `10` |

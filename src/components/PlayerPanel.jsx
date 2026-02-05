@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Activity, Eye, EyeOff, Save, Upload, UploadCloud, DownloadCloud, X, Undo, LogOut, RefreshCw } from 'lucide-react';
+import TokenPanel from './TokenPanel';
 import { DIFFICULTY_PRESETS } from '../config';
 import { remoteLog } from '../utils/logger';
 import LoginForm from './LoginForm';
@@ -7,9 +8,10 @@ import LoginForm from './LoginForm';
 const PlayerPanel = ({
     config, onStep, onSave, onLoad, onSaveServer, onLoadServer, onDeleteServer,
     onReset, onRestart, onChangeDifficulty, onUndo, mapList, onFetchMaps, currentStep,
-    useBackend, setUseBackend, autoSync, onToggleAutoSync,
+    useBackend, autoSync, onToggleAutoSync,
     layerVisibility, setLayerVisibility,
-    user, isGuest, onLogout, onShowLogin, showLoginModal, onCloseLoginModal, onLoginFromGuest, onRegisterFromGuest
+    user, isGuest, onLogout, onShowLogin, showLoginModal, onCloseLoginModal, onLoginFromGuest, onRegisterFromGuest,
+    tokenPanelProps
 }) => {
     const [showMapList, setShowMapList] = useState(false);
 
@@ -53,24 +55,15 @@ const PlayerPanel = ({
                 )}
             </div>
 
-            {/* Backend & Auto Sync */}
-            {setUseBackend != null && (
+            {/* Auto Sync (players always use backend; guests have no backend option) */}
+            {!isGuest && onToggleAutoSync != null && (
                 <div style={{ ...sectionStyle, padding: '10px 12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', color: '#c9d1d9' }}>
-                            <input type="checkbox" checked={useBackend} onChange={(e) => setUseBackend(e.target.checked)}
-                                style={{ accentColor: '#00f2ff', width: '14px', height: '14px', cursor: 'pointer' }} />
-                            <span>Backend</span>
-                        </label>
-                        {useBackend && onToggleAutoSync != null && (
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', color: '#c9d1d9' }}>
-                                <input type="checkbox" checked={autoSync} onChange={onToggleAutoSync}
-                                    style={{ accentColor: '#00f2ff', width: '14px', height: '14px', cursor: 'pointer' }} />
-                                <RefreshCw size={14} style={{ opacity: autoSync ? 1 : 0.4, color: autoSync ? '#00f2ff' : '#8b949e' }} />
-                                <span>Auto Sync</span>
-                            </label>
-                        )}
-                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer', color: '#c9d1d9' }}>
+                        <input type="checkbox" checked={autoSync} onChange={onToggleAutoSync}
+                            style={{ accentColor: '#00f2ff', width: '14px', height: '14px', cursor: 'pointer' }} />
+                        <RefreshCw size={14} style={{ opacity: autoSync ? 1 : 0.4, color: autoSync ? '#00f2ff' : '#8b949e' }} />
+                        <span>Auto Sync</span>
+                    </label>
                 </div>
             )}
 
@@ -153,6 +146,8 @@ const PlayerPanel = ({
                     ))}
                 </div>
             </section>
+
+            {tokenPanelProps && <TokenPanel {...tokenPanelProps} />}
 
             <div className="legend-section" style={sectionStyle}>
                 <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '13px' }}>Legend</h3>

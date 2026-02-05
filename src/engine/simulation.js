@@ -2,11 +2,11 @@ import { MINION_TYPES } from '../config.js';
 import { remoteLog } from '../utils/logger.js';
 
 // Helper for random movement within constraints
-// Helper for random movement within constraints
+// For each minion: generate random movement (within max), validate, retry up to 10 times; if no valid move, don't move
 export const moveMinion = (minion, config, physicalMap, activeLevels = null) => {
     const { type, x, z, level } = minion;
-    const maxMove = config[type.toUpperCase()].MAX_MOVE;
-    const MAX_ATTEMPTS = 5;
+    const maxMove = config[type.toUpperCase()]?.MAX_MOVE ?? 1;
+    const MAX_ATTEMPTS = 10;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         // Random angle and distance
@@ -79,25 +79,26 @@ export const moveMinion = (minion, config, physicalMap, activeLevels = null) => 
         if (!isMoveValid) continue;
 
         // 2. Check Coverage
-        // Use activeLevels if provided to check active status
-        const checkingActive = !!activeLevels;
-        const levelCells = checkingActive
+        // Allow coverage from any cell (active or inactive)
+        const levelCells = activeLevels
             ? activeLevels.find(l => l.id === newLevel)?.cells
             : targetLevelData?.cells;
 
         if (levelCells && levelCells.length > 0) {
+            // Safety margin: use 99.99% of radius to fix (1) moves into inactive-only edge zones
+            // and (2) floating-point boundary edge cases, without rejecting valid moves
+            const MOVE_SAFETY_MARGIN = 0.9999;
             let isCovered = false;
             for (const cell of levelCells) {
                 const dx = newX - cell.x;
                 const dz = newZ - cell.z;
-                const radius = (cell.type === 'coverage' ? config.COVERAGE_CELL_RADIUS : config.CAPACITY_CELL_RADIUS);
-                // Hexagonal Check logic matching evaluateCoverage
+                const fullRadius = (cell.type === 'coverage' ? config.COVERAGE_CELL_RADIUS : config.CAPACITY_CELL_RADIUS);
+                const radius = fullRadius * MOVE_SAFETY_MARGIN;
                 const qx = Math.abs(dx);
                 const qz = Math.abs(dz);
                 const diag = (Math.sqrt(3) / 2) * qx + 0.5 * qz;
 
                 if (qz < radius && diag < radius && qx < radius * (Math.sqrt(3) / 2)) {
-                    // Per user request: Any cell is OK (active or inactive)
                     isCovered = true;
                     break;
                 }
@@ -123,7 +124,7 @@ export const moveMinion = (minion, config, physicalMap, activeLevels = null) => 
         }
     }
 
-    // Failed to find valid move
+    // Failed to find valid move after MAX_ATTEMPTS retries: don't move
     return { ...minion };
 };
 
@@ -138,10 +139,11 @@ export const evaluateCoverage = (minions, levels, config, logger) => {
     const CELL_CAPACITY_LIMIT = config.COVERAGE_LIMIT_MBPS || 100; // Apply to both for now
 
     // 1. Calculate Energy & Identify Functional (Backhauled) Capacity Cells
-    // Count active cells for energy cost
+    // Count active cells for energy cost (guard against NaN from missing config)
+    const energyPerCell = Number(config.CELL_ENERGY_COST) || 1;
     levels.forEach(l => {
         l.cells.forEach(c => {
-            if (c.active) energyConsumed += config.MINION_ENERGY_COST;
+            if (c.active) energyConsumed += energyPerCell;
         });
     });
 

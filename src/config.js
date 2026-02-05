@@ -14,7 +14,7 @@ const deepMerge = (base, overrides) => {
 export const DEFAULT_CONFIG = {
     // Global Settings
     TARGET_STEPS: 100,
-    MINION_ENERGY_COST: 1.0,
+    CELL_ENERGY_COST: 1.0, // Energy cost per active cell per step (minions don't cost energy)
     TOTAL_ENERGY: 1000,
     MAP_LEVELS: 2,
     COVERAGE_CELLS_COUNT: 7,
@@ -128,7 +128,7 @@ export const DIFFICULTY_PRESETS = {
 
 /** Keys used for scenario generation (sent to /api/generate). Excludes viewing-only keys like LAYER_OFFSETS. */
 export const GENERATION_CONFIG_KEYS = [
-    'TARGET_STEPS', 'MINION_ENERGY_COST', 'TOTAL_ENERGY', 'MAP_LEVELS',
+    'TARGET_STEPS', 'CELL_ENERGY_COST', 'TOTAL_ENERGY', 'MAP_LEVELS',
     'COVERAGE_CELLS_COUNT', 'CAPACITY_CELLS_COUNT', 'COVERAGE_LIMIT_MBPS',
     'COVERAGE_CELL_RADIUS', 'CAPACITY_CELL_RADIUS', 'LEVEL_DISTANCE',
     'PORTAL_PAIR_COUNT', 'PORTAL_AREA', 'TOTAL_OBSTACLE_AREA_PER_LEVEL',

@@ -145,7 +145,7 @@ const LoginForm = ({ onLogin, onRegister, onGuest, hideGuestButton = false, comp
                     <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #30363d' }}>
                         <button
                             type="button"
-                            onClick={onGuest}
+                            onClick={() => onGuest?.()}
                             style={{
                                 width: '100%',
                                 padding: '10px',

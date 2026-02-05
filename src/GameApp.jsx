@@ -175,9 +175,9 @@ const GameApp = () => {
 
     const layerOffsets = config.LAYER_OFFSETS || DEFAULT_CONFIG.LAYER_OFFSETS;
 
-    // API Sync States
-    const [useBackend, setUseBackend] = useState(true);
-    const [autoSync, setAutoSync] = useState(true);
+    // API Sync States (players always use backend; guest = local only)
+    const useBackend = !isGuest;
+    const [autoSync, setAutoSync] = useState(false);
     const [lastApiStepResult, setLastApiStepResult] = useState(null);
 
     const getAuthHeaders = useCallback(() => {
@@ -212,11 +212,11 @@ const GameApp = () => {
 
     useEffect(() => {
         let interval;
-        if (autoSync) {
+        if (autoSync && !isAdmin && useBackend) {
             interval = setInterval(fetchApiState, 2000);
         }
         return () => clearInterval(interval);
-    }, [autoSync, fetchApiState]);
+    }, [autoSync, isAdmin, useBackend, fetchApiState]);
 
     // On login (non-guest, useBackend): init player scenario (create dir, copy easy if new user, load into server)
     useEffect(() => {
@@ -710,7 +710,7 @@ const GameApp = () => {
             <div className="map-container">
                 <div className="status-overlay">
                     <div className="status-title">{status}</div>
-                    <div className="status-sub">Step {currentStep} / {config.TARGET_STEPS} | Energy Left: {(config.TOTAL_ENERGY - totalEnergyConsumed).toFixed(1)}</div>
+                    <div className="status-sub">Step {currentStep} / {config.TARGET_STEPS} | Energy Left: {((Number(config.TOTAL_ENERGY) || 0) - (Number(totalEnergyConsumed) || 0) || 0).toFixed(1)}</div>
                 </div>
 
                 <Canvas camera={{ position: [30, 40, 50], fov: 45 }}>
@@ -928,6 +928,7 @@ const GameApp = () => {
                 user={user}
                 isGuest={isGuest}
                 isAdmin={isAdmin}
+                token={token}
                 onLogout={logout}
                 onShowLogin={isGuest ? () => setShowLoginModal(true) : undefined}
                 showLoginModal={showLoginModal}
@@ -958,7 +959,6 @@ const GameApp = () => {
                 layerVisibility={layerVisibility}
                 setLayerVisibility={setLayerVisibility}
                 useBackend={useBackend}
-                setUseBackend={setUseBackend}
                 autoSync={autoSync}
                 onToggleAutoSync={handleToggleAutoSync}
                 lastApiStepResult={lastApiStepResult}

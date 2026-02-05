@@ -16,13 +16,17 @@ export const AuthProvider = ({ children }) => {
             localStorage.setItem(TOKEN_KEY, token);
             const u = localStorage.getItem(USER_KEY);
             if (u) setUser(JSON.parse(u));
-            localStorage.removeItem(GUEST_KEY);
-            setIsGuest(false);
+            if (!token.startsWith('g_')) setIsGuest(false);
         } else {
             localStorage.removeItem(TOKEN_KEY);
             localStorage.removeItem(USER_KEY);
         }
     }, [token]);
+
+    useEffect(() => {
+        if (isGuest) localStorage.setItem(GUEST_KEY, 'true');
+        else localStorage.removeItem(GUEST_KEY);
+    }, [isGuest]);
 
     useEffect(() => {
         if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
@@ -38,6 +42,7 @@ export const AuthProvider = ({ children }) => {
         if (!res.ok) throw new Error(data.error || 'Login failed');
         setToken(data.token);
         setUser(data.user);
+        setIsGuest(false);
         return data;
     }, []);
 
@@ -51,6 +56,7 @@ export const AuthProvider = ({ children }) => {
         if (!res.ok) throw new Error(data.error || 'Registration failed');
         setToken(data.token);
         setUser(data.user);
+        setIsGuest(false);
         return data;
     }, []);
 
@@ -74,11 +80,21 @@ export const AuthProvider = ({ children }) => {
 
     const isAuthenticated = !!token || isGuest;
 
+    /** Apply a pasted token (clears user/guest state; use for TokenPanel) */
+    const applyToken = useCallback((newToken) => {
+        if (!newToken || !String(newToken).trim()) return;
+        setToken(String(newToken).trim());
+        setUser(null);
+        setIsGuest(String(newToken).trim().startsWith('g_'));
+    }, []);
+
     return (
         <AuthContext.Provider value={{
             user,
             token,
             isGuest,
+            setToken,
+            applyToken,
             isAuthenticated,
             isAdmin: !!user && user.role === 'admin',
             login,
