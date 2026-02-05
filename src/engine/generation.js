@@ -1,5 +1,5 @@
 import { CELL_TYPES } from '../config.js';
-import { getCoveringCellForPosition, getLoadOnCoverageCell } from './simulation.js';
+import { getCoveringCellForPosition, getLoadOnCoverageCell, evaluateCoverage } from './simulation.js';
 
 // Simplified coordinate helper (shared with HexCell)
 export const getHexPosition = (q, r, radius) => {
@@ -348,6 +348,15 @@ export const generateScenario = (config, physicalMap = null, resetMap = true, lo
         logger.log(`[GEN] Validation Success: All minions are covered by active cells.`);
     }
 
-    const scenarioState = { levels: newLevels, minions: newMinions };
+    // Calculate cell load on generation
+    const { minionStates, cellLoads } = evaluateCoverage(newMinions, newLevels, config, logger);
+    const cellLoadsMap = cellLoads || {};
+    newLevels.forEach(level => {
+        level.cells.forEach(cell => {
+            cell.capacityConsumed = cellLoadsMap[cell.id] ?? 0;
+        });
+    });
+
+    const scenarioState = { levels: newLevels, minions: minionStates };
     return { scenarioState, physicalMap: generatedPhysicalMap, mapRadius: finalRadius };
 };

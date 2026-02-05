@@ -85,6 +85,7 @@ const GameApp = () => {
     const layerVisibilityDefaults = {
         coverage: true,
         capacity: true,
+        cellLoad: true,
         minions: true,
         axes: true,
         zone_HUMAN: true,
@@ -414,10 +415,6 @@ const GameApp = () => {
         setPhysicalMap(newPhysicalMap);
         setScenarioState(newScenarioState);
 
-        // Immediate evaluation after generation
-        const { minionStates } = evaluateCoverage(newScenarioState.minions, newScenarioState.levels, configRef.current);
-        setScenarioState(prev => ({ ...prev, minions: minionStates }));
-
         setCurrentStep(0);
         setStatus('New Simulation Started');
         remoteLog(`[SIM] Simulation Initialized: ${newScenarioState.levels.length} levels, ${newScenarioState.minions.length} minions.`);
@@ -429,8 +426,15 @@ const GameApp = () => {
     useEffect(() => {
         if (scenarioState.levels.length > 0) {
             remoteLog(`[SIM] Re-evaluating coverage due to config change...`);
-            const { minionStates } = evaluateCoverage(scenarioState.minions, scenarioState.levels, config);
-            setScenarioState(prev => ({ ...prev, minions: minionStates }));
+            const { minionStates, cellLoads } = evaluateCoverage(scenarioState.minions, scenarioState.levels, config);
+            const levelsWithLoad = scenarioState.levels.map(level => ({
+                ...level,
+                cells: level.cells.map(cell => ({
+                    ...cell,
+                    capacityConsumed: (cellLoads || {})[cell.id] ?? 0
+                }))
+            }));
+            setScenarioState(prev => ({ ...prev, levels: levelsWithLoad, minions: minionStates }));
         }
     }, [scenarioState.levels, config.CAPACITY_CELL_RADIUS, config.COVERAGE_CELL_RADIUS]);
 
@@ -745,10 +749,17 @@ const GameApp = () => {
             return;
         }
 
-        const { minionStates, failure } = evaluateCoverage(scenarioState.minions, scenarioState.levels, config);
+        const { minionStates, failure, cellLoads } = evaluateCoverage(scenarioState.minions, scenarioState.levels, config);
         const movedMinions = minionStates.map(m => moveMinion(m, config, physicalMap, scenarioState.levels, undefined, minionStates));
 
-        setScenarioState(prev => ({ ...prev, minions: movedMinions }));
+        const levelsWithLoad = scenarioState.levels.map(level => ({
+            ...level,
+            cells: level.cells.map(cell => ({
+                ...cell,
+                capacityConsumed: (cellLoads || {})[cell.id] ?? 0
+            }))
+        }));
+        setScenarioState(prev => ({ ...prev, levels: levelsWithLoad, minions: movedMinions }));
         setCurrentStep(prev => prev + 1);
         const stepMsg = failure ? `ALERT: ${failure}` : `Step ${currentStep + 1} Success`;
         setStatus(stepMsg);
@@ -946,6 +957,8 @@ const GameApp = () => {
                                                 onClick={() => toggleCell(level.id, cell.id)}
                                                 shouldBeOn={cell.shouldBeOn}
                                                 isGameOver={isGameOver}
+                                                capacityConsumed={cell.capacityConsumed}
+                                                showCellLoad={layerVisibility.cellLoad}
                                             />
                                         ))}
                                     </group>
@@ -962,6 +975,8 @@ const GameApp = () => {
                                                 onClick={() => toggleCell(level.id, cell.id)}
                                                 shouldBeOn={cell.shouldBeOn}
                                                 isGameOver={isGameOver}
+                                                capacityConsumed={cell.capacityConsumed}
+                                                showCellLoad={layerVisibility.cellLoad}
                                             />
                                         ))}
                                     </group>

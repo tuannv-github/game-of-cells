@@ -129,7 +129,7 @@ const PlayerPanel = ({
             <section style={sectionStyle}>
                 <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}><Eye size={16} /> Layer Visibility</h3>
                 <div className="visibility-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    {Object.keys(layerVisibility).map(layer => (
+                    {['coverage', 'capacity', 'cellLoad', 'minions', 'axes', 'minionRange', ...Object.keys(layerVisibility).filter(k => !['coverage', 'capacity', 'cellLoad', 'minions', 'axes', 'minionRange'].includes(k))].map(layer => (
                         <button key={layer} onClick={() => toggleLayer(layer)}
                             style={{
                                 display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 10px', fontSize: '11px',
@@ -140,6 +140,7 @@ const PlayerPanel = ({
                             }}>
                             {layerVisibility[layer] ? <Eye size={12} /> : <EyeOff size={12} />}
                             {layer === 'minionRange' ? 'Movement Range' :
+                                layer === 'cellLoad' ? 'Cell Load' :
                                 layer.startsWith('zone_') ? `Zone: ${layer.replace('zone_', '')}` :
                                 layer.startsWith('minion_') ? `Minion: ${layer.replace('minion_', '').replace('_', ' ')}` :
                                     layer.charAt(0).toUpperCase() + layer.slice(1)}

@@ -400,12 +400,19 @@ export const evaluateCoverage = (minions, levels, config, logger) => {
         allFunctionalIds.push(...l.cells.filter(c => c.active).map(c => c.id));
     });
 
+    // Build cellLoads: { cellId: capacityConsumed } for each assigned cell
+    const cellLoads = {};
+    for (const [cellId, data] of Object.entries(cellAssignments)) {
+        cellLoads[cellId] = data.totalLoad;
+    }
+
     return {
         minionStates,
         energyConsumed,
         failure,
         cellsShouldBeOn: Array.from(cellsShouldBeOn),
         uncoveredMinions: uncoveredMinionIds,
-        functionalCellIds: allFunctionalIds
+        functionalCellIds: allFunctionalIds,
+        cellLoads
     };
 };

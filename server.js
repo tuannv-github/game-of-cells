@@ -751,7 +751,7 @@ app.post('/api/player/step', (req, res) => {
     );
 
     // 3. Evaluate Coverage
-    const { minionStates, energyConsumed, failure, cellsShouldBeOn, uncoveredMinions, functionalCellIds } = evaluateCoverage(
+    const { minionStates, energyConsumed, failure, cellsShouldBeOn, uncoveredMinions, functionalCellIds, cellLoads } = evaluateCoverage(
         movedMinions,
         newLevels,
         configToUse,
@@ -761,6 +761,14 @@ app.post('/api/player/step', (req, res) => {
             error: (m) => writeToLogFile(m, 'error')
         }
     );
+
+    // 3.5 Merge capacity consumed into each cell
+    const cellLoadsMap = cellLoads || {};
+    newLevels.forEach(level => {
+        level.cells.forEach(cell => {
+            cell.capacityConsumed = cellLoadsMap[cell.id] ?? 0;
+        });
+    });
 
     // 4. Calculate cumulative energy (guard against NaN from corrupted state or missing config)
     const safeTotal = loadedTotalEnergy;
@@ -834,7 +842,8 @@ app.post('/api/player/step', (req, res) => {
             energyLeft,
             uncoveredMinions: logicalFailure ? uncoveredMinions : undefined,
             gameOver: logicalFailure,
-            functionalCellIds
+            functionalCellIds,
+            cellLoads: cellLoadsMap
         }
     };
 

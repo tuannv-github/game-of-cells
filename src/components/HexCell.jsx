@@ -1,8 +1,9 @@
 
 import React, { useRef, useMemo } from 'react';
 import * as THREE from 'three';
+import { Text } from '@react-three/drei';
 
-const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = false, isGameOver = false, showCoverage = false }) => {
+const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = false, isGameOver = false, showCoverage = false, capacityConsumed = 0, showCellLoad = false }) => {
     const meshRef = useRef();
 
     const hexShape = useMemo(() => {
@@ -76,6 +77,21 @@ const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = 
                         side={THREE.DoubleSide}
                     />
                 </mesh>
+            )}
+
+            {/* Capacity consumed label: coverage = below layer, capacity = above layer, black outline */}
+            {showCellLoad && capacityConsumed > 0 && (
+                <Text
+                    position={[0, type === 'coverage' ? -2.6 : 2.6, 0]}
+                    fontSize={Math.min(serviceRadius * 0.7, 6)}
+                    color="#ffffff"
+                    anchorX="center"
+                    anchorY="middle"
+                    outlineWidth={0.06}
+                    outlineColor="#000000"
+                >
+                    {capacityConsumed}
+                </Text>
             )}
         </group>
     );
