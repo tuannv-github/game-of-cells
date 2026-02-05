@@ -23,8 +23,10 @@ const LOG_DIR = path.resolve(__dirname, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'server.log');
 const SCENARIOS_DIR = path.resolve(__dirname, 'scenarios');
 const SCENARIOS_ADMIN_DIR = path.resolve(__dirname, 'scenarios_admin');
+const SCORES_FILE = path.resolve(__dirname, 'data', 'scores.json');
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+if (!fs.existsSync(path.dirname(SCORES_FILE))) fs.mkdirSync(path.dirname(SCORES_FILE), { recursive: true });
 if (!fs.existsSync(SCENARIOS_DIR)) fs.mkdirSync(SCENARIOS_DIR, { recursive: true });
 if (!fs.existsSync(SCENARIOS_ADMIN_DIR)) fs.mkdirSync(SCENARIOS_ADMIN_DIR, { recursive: true });
 
@@ -68,6 +70,68 @@ const requireAuth = (req, res, next) => {
 /** Sanitize username for use in filesystem paths */
 const sanitizePlayerDir = (username) => String(username || 'guest').replace(/[^a-zA-Z0-9_-]/g, '_');
 
+/** Load scores from file: { easy: { username: { step, energyConsumed } | number }, ... } */
+const loadScores = () => {
+    try {
+        if (fs.existsSync(SCORES_FILE)) {
+            return JSON.parse(fs.readFileSync(SCORES_FILE, 'utf-8'));
+        }
+    } catch (e) {
+        writeToLogFile(`[SCORES] Error loading: ${e.message}`, 'warn');
+    }
+    return { easy: {}, medium: {}, hard: {} };
+};
+
+/** Normalize legacy score (number) to { step, energyConsumed } */
+const normalizeScore = (v) => {
+    if (v == null) return null;
+    if (typeof v === 'object' && 'step' in v) return { step: Number(v.step) || 0, energyConsumed: Number(v.energyConsumed) ?? 0 };
+    return { step: Number(v) || 0, energyConsumed: 0 };
+};
+
+/** Compare: a better than b = true. Higher step wins; if equal, lower energyConsumed wins */
+const isScoreBetter = (a, b) => {
+    const sa = normalizeScore(a);
+    const sb = normalizeScore(b);
+    if (!sa || !sb) return !!sa;
+    if (sa.step !== sb.step) return sa.step > sb.step;
+    return sa.energyConsumed < sb.energyConsumed;
+};
+
+/** Save score for user on difficulty (only if better: higher step, or same step with lower energy) */
+const saveScoreIfHigher = (username, difficulty, step, energyConsumed) => {
+    if (!username || !['easy', 'medium', 'hard'].includes(difficulty)) return;
+    const scores = loadScores();
+    if (!scores[difficulty]) scores[difficulty] = {};
+    const prev = scores[difficulty][username];
+    const newScore = { step: Number(step) || 0, energyConsumed: Number(energyConsumed) ?? 0 };
+    if (prev != null && !isScoreBetter(newScore, prev)) return;
+    scores[difficulty][username] = newScore;
+    try {
+        fs.writeFileSync(SCORES_FILE, JSON.stringify(scores, null, 2));
+        writeToLogFile(`[SCORES] ${username} ${difficulty}: step=${newScore.step} energy=${newScore.energyConsumed} (prev: ${prev ? JSON.stringify(normalizeScore(prev)) : '-'})`, 'info');
+    } catch (e) {
+        writeToLogFile(`[SCORES] Error saving: ${e.message}`, 'warn');
+    }
+};
+
+/** Get leaderboard: rank by step desc, then energyConsumed asc */
+const getLeaderboards = () => {
+    const scores = loadScores();
+    return ['easy', 'medium', 'hard'].map(difficulty => {
+        const entries = Object.entries(scores[difficulty] || {})
+            .map(([username, v]) => ({ username, ...normalizeScore(v) }))
+            .sort((a, b) => {
+                if (a.step !== b.step) return b.step - a.step;
+                return a.energyConsumed - b.energyConsumed;
+            });
+        return {
+            difficulty,
+            entries: entries.map((e, i) => ({ rank: i + 1, username: e.username, score: e.step, energyConsumed: e.energyConsumed }))
+        };
+    });
+};
+
 /** Get guest scenario directory path */
 const getGuestDir = (guestId) => path.join(SCENARIOS_DIR, 'guest', String(guestId).replace(/[^a-zA-Z0-9_-]/g, '_'));
 
@@ -81,7 +145,9 @@ const ensureGuestScenario = (guestId) => {
         const fallbackPath = path.join(SCENARIOS_DIR, 'map_autosave_initial.json');
         const srcPath = fs.existsSync(easyPath) ? easyPath : (fs.existsSync(fallbackPath) ? fallbackPath : null);
         if (srcPath) {
-            fs.copyFileSync(srcPath, initialPath);
+            const data = JSON.parse(fs.readFileSync(srcPath, 'utf-8'));
+            data.difficulty = data.difficulty || 'easy';
+            fs.writeFileSync(initialPath, JSON.stringify(data, null, 2));
             writeToLogFile(`[INIT] New guest ${guestId}: copied to ${dir}/initial.json`, 'info');
         }
     }
@@ -96,7 +162,9 @@ const ensurePlayerScenario = (username) => {
     if (!fs.existsSync(initialPath)) {
         const easyPath = path.join(SCENARIOS_ADMIN_DIR, 'easy.json');
         if (fs.existsSync(easyPath)) {
-            fs.copyFileSync(easyPath, initialPath);
+            const data = JSON.parse(fs.readFileSync(easyPath, 'utf-8'));
+            data.difficulty = 'easy';
+            fs.writeFileSync(initialPath, JSON.stringify(data, null, 2));
             writeToLogFile(`[INIT] New player ${username}: copied easy.json to ${dir}/initial.json`, 'info');
         }
     }
@@ -112,6 +180,7 @@ const performRestart = (loadPath, req) => {
         scenarioState,
         physicalMap,
         config: savedConfig || currentConfig,
+        difficulty: savedState.difficulty || savedConfig?.difficulty || 'easy',
         totalEnergyConsumed: 0,
         currentStep: 0,
         mapRadius: savedState.mapRadius,
@@ -686,6 +755,7 @@ app.post('/api/player/step', (req, res) => {
     const loadedTotalEnergy = Number(previousState.totalEnergyConsumed) || 0;
     const loadedStep = previousState.currentStep ?? 0;
     const configToUse = previousState.config ? { ...currentConfig, ...previousState.config } : currentConfig;
+    const difficulty = previousState.difficulty || configToUse?.difficulty || 'easy';
     const loadedGameOver = !!(previousState.lastResult?.gameOver || previousState.lastResult?.failure);
     const loadedGameOverMsg = previousState.lastResult?.msg || '';
 
@@ -840,6 +910,7 @@ app.post('/api/player/step', (req, res) => {
         scenarioState: responseData.scenarioState,
         physicalMap,
         config: configToUse,
+        difficulty,
         totalEnergyConsumed: newTotalEnergyConsumed,
         currentStep: currentStep,
         lastResult: {
@@ -856,6 +927,9 @@ app.post('/api/player/step', (req, res) => {
     };
 
     const stepAuth = getAuthFromToken(req);
+    if (logicalFailure && stepAuth?.type === 'user') {
+        saveScoreIfHigher(stepAuth.username, difficulty, currentStep, newTotalEnergyConsumed);
+    }
     if (stepAuth?.type === 'user') {
         const playerDir = ensurePlayerScenario(stepAuth.username);
         const stepsDir = path.join(playerDir, 'steps');
@@ -942,6 +1016,27 @@ app.get('/api/player/get-state', (req, res) => {
 
 /**
  * @openapi
+ * /api/scores:
+ *   get:
+ *     tags: [Player]
+ *     summary: Get leaderboard (highest score per user per difficulty)
+ *     description: Returns ranked list for easy, medium, hard. Score = steps completed at game over.
+ *     responses:
+ *       200:
+ *         description: Leaderboards for each difficulty
+ */
+app.get('/api/scores', (req, res) => {
+    try {
+        const leaderboards = getLeaderboards();
+        res.json({ leaderboards });
+    } catch (e) {
+        writeToLogFile(`[SCORES] Error: ${e.message}`, 'warn');
+        res.status(500).json({ error: 'Failed to load scores' });
+    }
+});
+
+/**
+ * @openapi
  * /api/player/change-difficulty:
  *   post:
  *     tags: [Player]
@@ -1000,6 +1095,7 @@ app.post('/api/player/change-difficulty', (req, res) => {
         scenarioState,
         physicalMap,
         config,
+        difficulty,
         totalEnergyConsumed: 0,
         currentStep: 0,
         mapRadius,
