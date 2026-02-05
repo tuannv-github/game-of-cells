@@ -104,7 +104,6 @@ const performRestart = (loadPath, req) => {
     isGameOver = false;
     currentStep = 0;
     lastGameOverMsg = '';
-    stateHistory = [];
     currentConfig = { ...currentConfig, ...savedConfig };
     serverScenarioState = scenarioState;
     serverPhysicalMap = physicalMap;
@@ -132,7 +131,6 @@ let isGameOver = false;
 let currentStep = 0;
 let lastCellsShouldBeOn = [];
 let lastGameOverMsg = '';
-let stateHistory = []; // Store previous states for undo functionality
 
 // Server-side state management
 let serverScenarioState = null;
@@ -432,8 +430,6 @@ app.post('/api/generate', requireAdmin, (req, res) => {
     isGameOver = false;
     currentStep = 0;
     lastGameOverMsg = '';
-    stateHistory = []; // Clear history on new generation
-
     // Initialize server state
     serverScenarioState = result.scenarioState;
     serverPhysicalMap = result.physicalMap;
@@ -537,20 +533,6 @@ app.post('/api/player/step', (req, res) => {
     }
 
     const { on = [] } = req.body;
-
-    // Save current state to history before making changes (for undo)
-    stateHistory.push({
-        scenarioState: JSON.parse(JSON.stringify(serverScenarioState)),
-        physicalMap: JSON.parse(JSON.stringify(serverPhysicalMap)),
-        totalEnergyConsumed: serverTotalEnergyConsumed,
-        currentStep,
-        isGameOver
-    });
-
-    // Keep only last 10 states to prevent memory issues
-    if (stateHistory.length > 10) {
-        stateHistory.shift();
-    }
 
     // Final safety check: if still no state, we can't proceed
     if (!serverScenarioState) {
@@ -670,17 +652,11 @@ app.post('/api/player/step', (req, res) => {
         const currentPath = path.join(playerDir, 'current.json');
         if (fs.existsSync(currentPath)) fs.unlinkSync(currentPath);
         if (currentStep === 1) {
-            const prevState = stateHistory[0];
-            if (prevState && !fs.existsSync(path.join(playerDir, 'initial.json'))) {
-                const initialState = {
-                    scenarioState: prevState.scenarioState,
-                    physicalMap: prevState.physicalMap,
-                    config: currentConfig,
-                    totalEnergyConsumed: prevState.totalEnergyConsumed,
-                    currentStep: 0,
-                    lastResult: null
-                };
-                fs.writeFileSync(path.join(playerDir, 'initial.json'), JSON.stringify(initialState, null, 2));
+            const step0Path = path.join(stepsDir, 'step_0.json');
+            const initialPath = path.join(playerDir, 'initial.json');
+            if (fs.existsSync(step0Path) && !fs.existsSync(initialPath)) {
+                fs.copyFileSync(step0Path, initialPath);
+                writeToLogFile(`[STEP] Copied step_0 to initial.json for ${stepUser.username}`, 'info');
             }
         }
     }
@@ -867,7 +843,6 @@ app.post('/api/player/init', requireAuth, (req, res) => {
     const loadedStep = data.currentStep ?? 0;
     isGameOver = !!(data.lastResult?.gameOver || data.lastResult?.failure);
     lastGameOverMsg = data.lastResult?.msg || '';
-    stateHistory = [];
     currentConfig = { ...currentConfig, ...config };
     serverScenarioState = scenarioState;
     serverPhysicalMap = physicalMap;
@@ -960,21 +935,38 @@ app.post('/api/restart', (req, res) => {
  *         description: No history available to undo
  */
 app.post('/api/undo', (req, res) => {
-    if (stateHistory.length === 0) {
+    const user = getAuthUser(req);
+    if (!user) {
+        return res.status(401).json({ msg: 'Authentication required for undo' });
+    }
+    if (currentStep === 0) {
         return res.status(400).json({
             msg: 'No previous state to undo to'
         });
     }
 
-    // Pop the last state from history
-    const previousState = stateHistory.pop();
+    const stepsDir = path.join(getPlayerScenariosDir(user.username), 'steps');
+    const prevStepPath = path.join(stepsDir, `step_${currentStep - 1}.json`);
+    if (!fs.existsSync(prevStepPath)) {
+        return res.status(400).json({
+            msg: 'No previous step file found to undo to'
+        });
+    }
 
-    // Restore the state
-    isGameOver = previousState.isGameOver;
-    currentStep = previousState.currentStep;
-    lastGameOverMsg = isGameOver ? (previousState.lastResult?.msg || '') : '';
+    // Remove latest step file (the one we're undoing from)
+    const latestToRemove = path.join(stepsDir, `step_${currentStep}.json`);
+    if (fs.existsSync(latestToRemove)) {
+        fs.unlinkSync(latestToRemove);
+        writeToLogFile(`[UNDO] Removed step_${currentStep}.json for ${user.username}`, 'info');
+    }
 
-    const { scenarioState, physicalMap, totalEnergyConsumed } = previousState;
+    // Load previous state from file
+    const previousState = JSON.parse(fs.readFileSync(prevStepPath, 'utf-8'));
+    const scenarioState = previousState.scenarioState ?? previousState.worldState;
+    const { physicalMap, totalEnergyConsumed, mapRadius } = previousState;
+    isGameOver = !!(previousState.lastResult?.gameOver || previousState.lastResult?.failure);
+    lastGameOverMsg = previousState.lastResult?.msg || '';
+    currentStep = previousState.currentStep ?? (currentStep - 1);
 
     // Update the intermediate save file
     const intermediateSavePath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
@@ -999,6 +991,7 @@ app.post('/api/undo', (req, res) => {
         msg: `Undone to step ${currentStep}`,
         scenarioState,
         physicalMap,
+        mapRadius,
         totalEnergyConsumed,
         currentStep
     });

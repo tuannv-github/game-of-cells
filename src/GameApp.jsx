@@ -658,6 +658,7 @@ const GameApp = () => {
             if (data.scenarioState) {
                 setScenarioState(data.scenarioState);
                 if (data.physicalMap) setPhysicalMap(data.physicalMap);
+                if (data.mapRadius != null) setMapRadius(data.mapRadius);
                 setCurrentStep(data.currentStep);
                 setTotalEnergyConsumed(data.totalEnergyConsumed);
                 setStatus(`Undone to Step ${data.currentStep}`);
