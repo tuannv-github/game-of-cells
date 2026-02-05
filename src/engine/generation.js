@@ -8,13 +8,13 @@ export const getHexPosition = (q, r, radius) => {
 };
 
 /**
- * Generates the game world based on configuration.
+ * Generates a scenario based on configuration.
  * @param {Object} config - The game configuration.
  * @param {Object} physicalMap - Optional pre-existing physical map.
  * @param {Boolean} resetMap - Whether to regenerate the physical map.
- * @returns {Object} { worldState, physicalMap, mapRadius }
+ * @returns {Object} { scenarioState, physicalMap, mapRadius }
  */
-export const generateWorld = (config, physicalMap = null, resetMap = true, logger = console) => {
+export const generateScenario = (config, physicalMap = null, resetMap = true, logger = console) => {
     const newLevels = [];
     let maxExt = 30; // Minimum floor size
 
@@ -90,7 +90,7 @@ export const generateWorld = (config, physicalMap = null, resetMap = true, logge
         logger.log(`[GEN] Level ${l}: Generated ${covCoords.length} coverage cells and ${capCoords.length} capacity cells`);
     }
 
-    logger.log(`[GEN] Starting world generation: levels=${config.MAP_LEVELS}, radius=${finalRadius}, obstacle_pct=${config.TOTAL_OBSTACLE_AREA_PER_LEVEL ?? 10}%`);
+    logger.log(`[GEN] Starting scenario generation: levels=${config.MAP_LEVELS}, radius=${finalRadius}, obstacle_pct=${config.TOTAL_OBSTACLE_AREA_PER_LEVEL ?? 10}%`);
 
     let generatedPhysicalMap = physicalMap;
     // 3. Dynamic Physical Map (Only on explicit click/mount)
@@ -351,6 +351,6 @@ export const generateWorld = (config, physicalMap = null, resetMap = true, logge
         logger.log(`[GEN] Validation Success: All minions are covered by active cells.`);
     }
 
-    const worldState = { levels: newLevels, minions: newMinions };
-    return { worldState, physicalMap: generatedPhysicalMap, mapRadius: finalRadius };
+    const scenarioState = { levels: newLevels, minions: newMinions };
+    return { scenarioState, physicalMap: generatedPhysicalMap, mapRadius: finalRadius };
 };

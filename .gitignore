@@ -1,5 +1,7 @@
 node_modules/
 logs
 scenarios/
+scenarios_admin/
 !scenarios/map_autosave_initial.json
 n8n_data
+data/

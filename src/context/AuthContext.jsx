@@ -80,6 +80,7 @@ export const AuthProvider = ({ children }) => {
             token,
             isGuest,
             isAuthenticated,
+            isAdmin: !!user && user.role === 'admin',
             login,
             register,
             logout,

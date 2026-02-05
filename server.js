@@ -7,10 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { DEFAULT_CONFIG } from './src/config.js';
-import { generateWorld } from './src/engine/generation.js';
+import { generateScenario } from './src/engine/generation.js';
 import { moveMinion, evaluateCoverage } from './src/engine/simulation.js';
 import { initDb, getDb } from './server/db.js';
-import { login, register, createToken } from './server/auth.js';
+import { login, register, createToken, verifyToken } from './server/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,12 +22,109 @@ const port = 40001;
 const LOG_DIR = path.resolve(__dirname, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'server.log');
 const SCENARIOS_DIR = path.resolve(__dirname, 'scenarios');
+const SCENARIOS_ADMIN_DIR = path.resolve(__dirname, 'scenarios_admin');
 
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 if (!fs.existsSync(SCENARIOS_DIR)) fs.mkdirSync(SCENARIOS_DIR, { recursive: true });
+if (!fs.existsSync(SCENARIOS_ADMIN_DIR)) fs.mkdirSync(SCENARIOS_ADMIN_DIR, { recursive: true });
 
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '50mb' }));
+
+/** Extract Bearer token from Authorization header */
+const getAuthUser = (req) => {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) return null;
+    return verifyToken(auth.slice(7));
+};
+
+/** Require admin role for scenario generation */
+const requireAdmin = (req, res, next) => {
+    const payload = getAuthUser(req);
+    if (!payload) return res.status(401).json({ error: 'Authentication required' });
+    if (payload.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    next();
+};
+
+/** Require any authenticated user */
+const requireAuth = (req, res, next) => {
+    const payload = getAuthUser(req);
+    if (!payload) return res.status(401).json({ error: 'Authentication required' });
+    req.authUser = payload;
+    next();
+};
+
+/** Sanitize username for use in filesystem paths */
+const sanitizePlayerDir = (username) => String(username || 'guest').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+/** Ensure player has a scenario dir and initial.json (copy from easy if new user) */
+const ensurePlayerScenario = (username) => {
+    const dir = path.join(SCENARIOS_DIR, sanitizePlayerDir(username));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const initialPath = path.join(dir, 'initial.json');
+    if (!fs.existsSync(initialPath)) {
+        const easyPath = path.join(SCENARIOS_ADMIN_DIR, 'easy.json');
+        if (fs.existsSync(easyPath)) {
+            fs.copyFileSync(easyPath, initialPath);
+            writeToLogFile(`[INIT] New player ${username}: copied easy.json to ${dir}/initial.json`, 'info');
+        }
+    }
+    return dir;
+};
+
+/** Perform restart from a given load path (initial.json or global). Saves to step_0 for authenticated users. */
+const performRestart = (loadPath, req) => {
+    const savedState = JSON.parse(fs.readFileSync(loadPath, 'utf-8'));
+    const scenarioState = savedState.scenarioState ?? savedState.worldState;
+    const { physicalMap, config: savedConfig } = savedState;
+    const fullState = {
+        scenarioState,
+        physicalMap,
+        config: savedConfig || currentConfig,
+        totalEnergyConsumed: 0,
+        currentStep: 0,
+        mapRadius: savedState.mapRadius,
+        lastResult: null
+    };
+    const intermediateSavePath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
+    fs.writeFileSync(intermediateSavePath, JSON.stringify(fullState, null, 2));
+    const user = getAuthUser(req);
+    if (user) {
+        const stepsDir = path.join(getPlayerScenariosDir(user.username), 'steps');
+        if (!fs.existsSync(stepsDir)) fs.mkdirSync(stepsDir, { recursive: true });
+        // Clear existing steps before copying initial to step_0
+        const existing = fs.readdirSync(stepsDir);
+        writeToLogFile(`[RESTART] Clearing ${existing.length} step(s) for ${user.username}`, 'info');
+        for (const f of existing) {
+            fs.unlinkSync(path.join(stepsDir, f));
+        }
+        writeToLogFile(`[RESTART] Copying initial to step_0.json for ${user.username}`, 'info');
+        fs.writeFileSync(path.join(stepsDir, 'step_0.json'), JSON.stringify(fullState, null, 2));
+    }
+    isGameOver = false;
+    currentStep = 0;
+    lastGameOverMsg = '';
+    stateHistory = [];
+    currentConfig = { ...currentConfig, ...savedConfig };
+    serverScenarioState = scenarioState;
+    serverPhysicalMap = physicalMap;
+    serverTotalEnergyConsumed = 0;
+    return { scenarioState, physicalMap, mapRadius: savedState.mapRadius };
+};
+
+/** Get latest step file path in player dir, or null if none */
+const getLatestStepPath = (playerDir) => {
+    const stepsDir = path.join(playerDir, 'steps');
+    if (!fs.existsSync(stepsDir)) return null;
+    const files = fs.readdirSync(stepsDir).filter(f => /^step_\d+\.json$/.test(f));
+    if (files.length === 0) return null;
+    const nums = files.map(f => parseInt(f.replace('step_', '').replace('.json', ''), 10));
+    const max = Math.max(...nums);
+    return path.join(stepsDir, `step_${max}.json`);
+};
+
+/** Get per-player scenarios directory path (ensures dir and initial.json exist for new users) */
+const getPlayerScenariosDir = (username) => ensurePlayerScenario(username);
 
 // Game state
 let currentConfig = { ...DEFAULT_CONFIG };
@@ -38,7 +135,7 @@ let lastGameOverMsg = '';
 let stateHistory = []; // Store previous states for undo functionality
 
 // Server-side state management
-let serverWorldState = null;
+let serverScenarioState = null;
 let serverPhysicalMap = null;
 let serverTotalEnergyConsumed = 0;
 
@@ -167,7 +264,7 @@ app.get('/api/config', (req, res) => {
     res.json(currentConfig);
 });
 
-app.post('/api/config', (req, res) => {
+app.post('/api/config', requireAdmin, (req, res) => {
     currentConfig = { ...currentConfig, ...req.body };
     res.json(currentConfig);
 });
@@ -199,17 +296,43 @@ app.post('/api/config', (req, res) => {
  *       200:
  *         description: Scenario saved
  */
-app.get('/api/maps', (req, res) => {
-    const files = fs.readdirSync(SCENARIOS_DIR).filter(f => f.endsWith('.json'));
+app.get('/api/maps', requireAuth, (req, res) => {
+    const playerDir = getPlayerScenariosDir(req.authUser.username);
+    const files = [];
+    if (fs.existsSync(playerDir)) {
+        const root = fs.readdirSync(playerDir).filter(f => f.endsWith('.json') && f !== 'current.json');
+        files.push(...root);
+        const stepsDir = path.join(playerDir, 'steps');
+        if (fs.existsSync(stepsDir)) {
+            files.push(...fs.readdirSync(stepsDir).filter(f => f.endsWith('.json')));
+        }
+    }
     res.json(files);
 });
 
 app.post('/api/maps', (req, res) => {
     const { name, data } = req.body;
     const filename = name || `scenario_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-    const filePath = path.join(SCENARIOS_DIR, filename);
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    res.json({ success: true, filename });
+    const user = getAuthUser(req);
+
+    // Admin saving difficulty presets (easy/medium/hard) -> scenarios_admin
+    const difficultyPresets = ['easy.json', 'medium.json', 'hard.json'];
+    if (difficultyPresets.includes(filename) && user?.role === 'admin') {
+        const filePath = path.join(SCENARIOS_ADMIN_DIR, filename);
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        return res.json({ success: true, filename });
+    }
+
+    // Player save -> per-player dir (steps only, no current)
+    if (!user) return res.status(401).json({ error: 'Authentication required to save scenarios' });
+    const playerDir = getPlayerScenariosDir(user.username);
+    const stepsDir = path.join(playerDir, 'steps');
+    if (!fs.existsSync(stepsDir)) fs.mkdirSync(stepsDir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const saveName = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const finalName = saveName && !difficultyPresets.includes(saveName) ? saveName : `manual_${ts}.json`;
+    fs.writeFileSync(path.join(stepsDir, finalName), JSON.stringify(data, null, 2));
+    res.json({ success: true, filename: finalName });
 });
 
 /**
@@ -244,8 +367,13 @@ app.post('/api/maps', (req, res) => {
  *       404:
  *         description: Not found
  */
-app.get('/api/maps/:name', (req, res) => {
-    const filePath = path.join(SCENARIOS_DIR, req.params.name);
+app.get('/api/maps/:name', requireAuth, (req, res) => {
+    const playerDir = getPlayerScenariosDir(req.authUser.username);
+    const name = req.params.name;
+    let filePath = path.join(playerDir, name);
+    if (!fs.existsSync(filePath)) {
+        filePath = path.join(playerDir, 'steps', name);
+    }
     if (fs.existsSync(filePath)) {
         res.json(JSON.parse(fs.readFileSync(filePath, 'utf-8')));
     } else {
@@ -253,8 +381,13 @@ app.get('/api/maps/:name', (req, res) => {
     }
 });
 
-app.delete('/api/maps/:name', (req, res) => {
-    const filePath = path.join(SCENARIOS_DIR, req.params.name);
+app.delete('/api/maps/:name', requireAuth, (req, res) => {
+    const playerDir = getPlayerScenariosDir(req.authUser.username);
+    const name = req.params.name;
+    let filePath = path.join(playerDir, name);
+    if (!fs.existsSync(filePath)) {
+        filePath = path.join(playerDir, 'steps', name);
+    }
     if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
         res.json({ success: true });
@@ -268,13 +401,30 @@ app.delete('/api/maps/:name', (req, res) => {
  * /api/generate:
  *   post:
  *     tags: [Scenario]
- *     summary: Generate a new scenario based on current config
+ *     summary: Generate a new scenario (admin only). Config optional in body.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               config:
+ *                 type: object
+ *                 description: Scenario generation config (includes difficulty when preset selected)
  *     responses:
  *       200:
  *         description: New scenario state
+ *       401:
+ *         description: Authentication required
+ *       403:
+ *         description: Admin only
  */
-app.post('/api/generate', (req, res) => {
-    const result = generateWorld(currentConfig, null, true, {
+app.post('/api/generate', requireAdmin, (req, res) => {
+    const configToUse = req.body?.config ? { ...currentConfig, ...req.body.config } : currentConfig;
+    currentConfig = configToUse;
+    const result = generateScenario(configToUse, null, true, {
         log: (m) => writeToLogFile(m, 'info'),
         warn: (m) => writeToLogFile(m, 'warn'),
         error: (m) => writeToLogFile(m, 'error')
@@ -285,7 +435,7 @@ app.post('/api/generate', (req, res) => {
     stateHistory = []; // Clear history on new generation
 
     // Initialize server state
-    serverWorldState = result.worldState;
+    serverScenarioState = result.scenarioState;
     serverPhysicalMap = result.physicalMap;
     serverTotalEnergyConsumed = 0;
 
@@ -341,7 +491,7 @@ app.post('/api/generate', (req, res) => {
  *                 currentStep:
  *                   type: integer
  *                   example: 1
- *                 worldState:
+ *                 scenarioState:
  *                   type: object
 
  *                 energyConsumed:
@@ -356,12 +506,12 @@ app.post('/api/generate', (req, res) => {
  */
 app.post('/api/player/step', (req, res) => {
     // Consistency check: ensure server state is loaded (useful if server restarted)
-    if (!serverWorldState) {
+    if (!serverScenarioState) {
         const intermediateSavePath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
         if (fs.existsSync(intermediateSavePath)) {
             try {
                 const savedState = JSON.parse(fs.readFileSync(intermediateSavePath, 'utf-8'));
-                serverWorldState = savedState.worldState;
+                serverScenarioState = savedState.scenarioState ?? savedState.worldState;
                 serverPhysicalMap = savedState.physicalMap;
                 serverTotalEnergyConsumed = savedState.totalEnergyConsumed || 0;
                 currentStep = savedState.currentStep || 0;
@@ -380,7 +530,7 @@ app.post('/api/player/step', (req, res) => {
     if (isGameOver) {
         return res.json({
             msg: lastGameOverMsg || 'Game over',
-            worldState: serverWorldState,
+            scenarioState: serverScenarioState,
             gameOver: true,
             currentStep
         });
@@ -390,7 +540,7 @@ app.post('/api/player/step', (req, res) => {
 
     // Save current state to history before making changes (for undo)
     stateHistory.push({
-        worldState: JSON.parse(JSON.stringify(serverWorldState)),
+        scenarioState: JSON.parse(JSON.stringify(serverScenarioState)),
         physicalMap: JSON.parse(JSON.stringify(serverPhysicalMap)),
         totalEnergyConsumed: serverTotalEnergyConsumed,
         currentStep,
@@ -403,14 +553,14 @@ app.post('/api/player/step', (req, res) => {
     }
 
     // Final safety check: if still no state, we can't proceed
-    if (!serverWorldState) {
+    if (!serverScenarioState) {
         return res.status(400).json({
-            msg: 'No active simulation state found. Please generate a world first.'
+            msg: 'No active simulation state found. Please generate a scenario first.'
         });
     }
 
     // 1. Apply cell states: cells in 'on' list are ON, all others are OFF
-    const newLevels = serverWorldState.levels.map(level => ({
+    const newLevels = serverScenarioState.levels.map(level => ({
         ...level,
         cells: level.cells.map(cell => ({
             ...cell,
@@ -419,7 +569,7 @@ app.post('/api/player/step', (req, res) => {
     }));
 
     // 2. Move Minions
-    const movedMinions = serverWorldState.minions.map(m =>
+    const movedMinions = serverScenarioState.minions.map(m =>
         moveMinion(m, currentConfig, serverPhysicalMap, newLevels)
     );
 
@@ -453,7 +603,7 @@ app.post('/api/player/step', (req, res) => {
         msg = 'Step completed successfully';
     }
 
-    // If failure contains cells to suggest, mark them in the world state
+    // If failure contains cells to suggest, mark them in the scenario state
     if (failure && cellsShouldBeOn && cellsShouldBeOn.length > 0) {
         newLevels.forEach(level => {
             level.cells.forEach(cell => {
@@ -470,7 +620,7 @@ app.post('/api/player/step', (req, res) => {
 
     const responseData = {
         msg,
-        worldState: { levels: newLevels, minions: minionStates },
+        scenarioState: { levels: newLevels, minions: minionStates },
         gameOver: logicalFailure,
         uncoveredMinions: logicalFailure ? uncoveredMinions : undefined,
         currentStep,
@@ -492,7 +642,7 @@ app.post('/api/player/step', (req, res) => {
     // Save step result to intermediate file
     const intermediateSavePath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
     const fullState = {
-        worldState: responseData.worldState,
+        scenarioState: responseData.scenarioState,
         physicalMap: serverPhysicalMap,
         config: currentConfig,
         totalEnergyConsumed: newTotalEnergyConsumed,
@@ -510,8 +660,33 @@ app.post('/api/player/step', (req, res) => {
     };
     fs.writeFileSync(intermediateSavePath, JSON.stringify(fullState, null, 2));
 
+    // Save to player dir (step_N only, no current) when authenticated
+    const stepUser = getAuthUser(req);
+    if (stepUser) {
+        const playerDir = ensurePlayerScenario(stepUser.username);
+        const stepsDir = path.join(playerDir, 'steps');
+        if (!fs.existsSync(stepsDir)) fs.mkdirSync(stepsDir, { recursive: true });
+        fs.writeFileSync(path.join(stepsDir, `step_${currentStep}.json`), JSON.stringify(fullState, null, 2));
+        const currentPath = path.join(playerDir, 'current.json');
+        if (fs.existsSync(currentPath)) fs.unlinkSync(currentPath);
+        if (currentStep === 1) {
+            const prevState = stateHistory[0];
+            if (prevState && !fs.existsSync(path.join(playerDir, 'initial.json'))) {
+                const initialState = {
+                    scenarioState: prevState.scenarioState,
+                    physicalMap: prevState.physicalMap,
+                    config: currentConfig,
+                    totalEnergyConsumed: prevState.totalEnergyConsumed,
+                    currentStep: 0,
+                    lastResult: null
+                };
+                fs.writeFileSync(path.join(playerDir, 'initial.json'), JSON.stringify(initialState, null, 2));
+            }
+        }
+    }
+
     // Update server state
-    serverWorldState = responseData.worldState;
+    serverScenarioState = responseData.scenarioState;
     serverTotalEnergyConsumed = newTotalEnergyConsumed;
 
     res.json(responseData);
@@ -523,19 +698,29 @@ app.post('/api/player/step', (req, res) => {
  *   get:
  *     tags: [Player]
  *     summary: Get the latest logical simulation state
- *     description: Returns the world state (minions, cells), energy metrics, and step count. Physical layer information (obstacles, transitions) is hidden from the player.
+ *     description: Returns the scenario state (minions, cells), energy metrics, and step count. Physical layer information (obstacles, transitions) is hidden from the player.
  *     responses:
  *       200:
  *         description: Current logical state
  */
 app.get('/api/player/get-state', (req, res) => {
-    const intermediateSavePath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
-    if (fs.existsSync(intermediateSavePath)) {
+    let loadPath = null;
+    const user = getAuthUser(req);
+    if (user) {
+        const playerDir = getPlayerScenariosDir(user.username);
+        loadPath = getLatestStepPath(playerDir);
+        if (!loadPath && fs.existsSync(path.join(playerDir, 'initial.json'))) {
+            loadPath = path.join(playerDir, 'initial.json');
+        }
+    }
+    if (!loadPath) {
+        loadPath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
+    }
+    if (fs.existsSync(loadPath)) {
         try {
-            const data = JSON.parse(fs.readFileSync(intermediateSavePath, 'utf-8'));
-            // Strip physical layer info for the player
+            const data = JSON.parse(fs.readFileSync(loadPath, 'utf-8'));
             const playerView = {
-                worldState: data.worldState,
+                scenarioState: data.scenarioState ?? data.worldState,
                 config: data.config,
                 currentStep: data.currentStep ?? 0,
                 totalEnergyConsumed: data.totalEnergyConsumed ?? 0,
@@ -546,8 +731,178 @@ app.get('/api/player/get-state', (req, res) => {
             res.status(500).json({ result: 'failure', msg: 'Error parsing state' });
         }
     } else {
-        res.json({ worldState: null, config: currentConfig, currentStep: 0 });
+        res.json({ scenarioState: null, config: currentConfig, currentStep: 0 });
     }
+});
+
+/**
+ * @openapi
+ * /api/player/change-difficulty:
+ *   post:
+ *     tags: [Player]
+ *     summary: Change difficulty (load easy, medium, or hard scenario)
+ *     description: Loads the scenario from scenarios_admin and resets the game, like restart but with a different difficulty.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [difficulty]
+ *             properties:
+ *               difficulty:
+ *                 type: string
+ *                 enum: [easy, medium, hard]
+ *     responses:
+ *       200:
+ *         description: Difficulty changed, new state returned
+ *       404:
+ *         description: Scenario not found for that difficulty
+ */
+app.post('/api/player/change-difficulty', (req, res) => {
+    const { difficulty } = req.body || {};
+    const user = getAuthUser(req);
+    writeToLogFile(`[CHANGE-DIFFICULTY] Request: difficulty=${difficulty}, user=${user?.username ?? 'anonymous'}`, 'info');
+
+    if (!['easy', 'medium', 'hard'].includes(difficulty)) {
+        writeToLogFile(`[CHANGE-DIFFICULTY] Rejected: invalid difficulty`, 'warn');
+        return res.status(400).json({ error: 'difficulty must be easy, medium, or hard' });
+    }
+    const filename = `${difficulty}.json`;
+    const filePath = path.join(SCENARIOS_ADMIN_DIR, filename);
+    if (!fs.existsSync(filePath)) {
+        writeToLogFile(`[CHANGE-DIFFICULTY] Rejected: ${filename} not found in scenarios_admin`, 'warn');
+        return res.status(404).json({ error: `No scenario found for ${difficulty}. Admin must save one first.` });
+    }
+    writeToLogFile(`[CHANGE-DIFFICULTY] Loading from ${filePath}`, 'info');
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    const scenarioState = data.scenarioState ?? data.worldState;
+    const physicalMap = data.physicalMap;
+    const config = data.config || currentConfig;
+    if (!scenarioState || !physicalMap) {
+        writeToLogFile(`[CHANGE-DIFFICULTY] Rejected: invalid scenario (missing scenarioState or physicalMap)`, 'warn');
+        return res.status(400).json({ error: 'Invalid scenario file' });
+    }
+    writeToLogFile(`[CHANGE-DIFFICULTY] Loaded: ${scenarioState.levels?.length ?? 0} levels, ${scenarioState.minions?.length ?? 0} minions`, 'info');
+    let mapRadius = data.mapRadius;
+    if (mapRadius == null && config) {
+        const numCoverage = Math.max(0, config.COVERAGE_CELL_RADIUS > 0 ? config.COVERAGE_CELLS_COUNT : 0);
+        const totalCoverageArea = numCoverage * Math.PI * Math.pow(config.COVERAGE_CELL_RADIUS || 50, 2);
+        mapRadius = Math.max(80, Math.sqrt(totalCoverageArea / Math.PI) * 1.2);
+    }
+    mapRadius = mapRadius || 80;
+    const fullState = {
+        scenarioState,
+        physicalMap,
+        config,
+        totalEnergyConsumed: 0,
+        currentStep: 0,
+        mapRadius,
+        lastResult: null
+    };
+
+    // 1. Copy difficulty to initial.json only
+    let restartLoadPath = null;
+    if (user) {
+        const playerDir = ensurePlayerScenario(user.username);
+        const initialPath = path.join(playerDir, 'initial.json');
+        fs.writeFileSync(initialPath, JSON.stringify(fullState, null, 2));
+        restartLoadPath = initialPath;
+        writeToLogFile(`[CHANGE-DIFFICULTY] Copied ${difficulty} to initial.json for ${user.username}`, 'info');
+    } else {
+        writeToLogFile(`[CHANGE-DIFFICULTY] No auth: saving to global only`, 'info');
+        const initialSavePath = path.join(SCENARIOS_DIR, 'map_autosave_initial.json');
+        fs.writeFileSync(initialSavePath, JSON.stringify(fullState, null, 2));
+        restartLoadPath = initialSavePath;
+    }
+
+    // 2. Call restart: copy initial to step_0, update server state (get-state will read from step_0)
+    writeToLogFile(`[CHANGE-DIFFICULTY] Calling restart from ${restartLoadPath}`, 'info');
+    const result = performRestart(restartLoadPath, req);
+
+    writeToLogFile(`[CHANGE-DIFFICULTY] Complete: ${difficulty}, step=0, user=${user?.username ?? 'anonymous'}`, 'info');
+
+    res.json({
+        msg: `Loaded ${difficulty} scenario`,
+        scenarioState: result.scenarioState,
+        physicalMap: result.physicalMap,
+        mapRadius: result.mapRadius,
+        config: currentConfig
+    });
+});
+
+/**
+ * @openapi
+ * /api/player/init:
+ *   post:
+ *     tags: [Player]
+ *     summary: Initialize player scenario (create dir, copy easy if new user, load into server)
+ *     description: On new user login, ensures player dir exists, copies easy.json if needed, loads scenario into server state.
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Scenario loaded and ready to play
+ *       401:
+ *         description: Authentication required
+ */
+app.post('/api/player/init', requireAuth, (req, res) => {
+    const playerDir = ensurePlayerScenario(req.authUser.username);
+    const currentPath = path.join(playerDir, 'current.json');
+    if (fs.existsSync(currentPath)) fs.unlinkSync(currentPath); // Remove current (use steps only)
+
+    // Load latest step if exists, else initial.json
+    const latestStepPath = getLatestStepPath(playerDir);
+    const loadPath = latestStepPath || path.join(playerDir, 'initial.json');
+    if (!fs.existsSync(loadPath)) {
+        return res.status(404).json({ error: 'No scenario found. Admin must save easy.json first.' });
+    }
+    const data = JSON.parse(fs.readFileSync(loadPath, 'utf-8'));
+    const scenarioState = data.scenarioState ?? data.worldState;
+    const physicalMap = data.physicalMap;
+    const config = data.config || currentConfig;
+    if (!scenarioState || !physicalMap) {
+        return res.status(400).json({ error: 'Invalid scenario file' });
+    }
+    const loadedStep = data.currentStep ?? 0;
+    isGameOver = !!(data.lastResult?.gameOver || data.lastResult?.failure);
+    lastGameOverMsg = data.lastResult?.msg || '';
+    stateHistory = [];
+    currentConfig = { ...currentConfig, ...config };
+    serverScenarioState = scenarioState;
+    serverPhysicalMap = physicalMap;
+    serverTotalEnergyConsumed = data.totalEnergyConsumed ?? 0;
+    currentStep = loadedStep;
+    const initialSavePath = path.join(SCENARIOS_DIR, 'map_autosave_initial.json');
+    const intermediateSavePath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
+    let mapRadius = data.mapRadius;
+    if (mapRadius == null && config) {
+        const numCoverage = Math.max(0, config.COVERAGE_CELL_RADIUS > 0 ? config.COVERAGE_CELLS_COUNT : 0);
+        const totalCoverageArea = numCoverage * Math.PI * Math.pow(config.COVERAGE_CELL_RADIUS || 50, 2);
+        mapRadius = Math.max(80, Math.sqrt(totalCoverageArea / Math.PI) * 1.2);
+    }
+    mapRadius = mapRadius || 80;
+    const fullState = {
+        scenarioState,
+        physicalMap,
+        config,
+        totalEnergyConsumed: data.totalEnergyConsumed ?? 0,
+        currentStep: loadedStep,
+        mapRadius,
+        lastResult: data.lastResult ?? null
+    };
+    fs.writeFileSync(initialSavePath, JSON.stringify(fullState, null, 2));
+    fs.writeFileSync(intermediateSavePath, JSON.stringify(fullState, null, 2));
+
+    res.json({
+        msg: 'Scenario initialized',
+        scenarioState,
+        physicalMap,
+        mapRadius,
+        config,
+        currentStep: loadedStep,
+        totalEnergyConsumed: data.totalEnergyConsumed ?? 0
+    });
 });
 
 /**
@@ -556,55 +911,38 @@ app.get('/api/player/get-state', (req, res) => {
  *   post:
  *     tags: [Scenario]
  *     summary: Restart the game after game over
- *     description: Resets the game over flag and generates a new world
+ *     description: Resets the game over flag and restores the initial scenario
  *     responses:
  *       200:
  *         description: Game restarted successfully
  */
 app.post('/api/restart', (req, res) => {
-    isGameOver = false;
-    currentStep = 0;
-    lastGameOverMsg = '';
-    stateHistory = []; // Clear history on restart
-
-    // Read the initial save (created at generation)
-    const initialSavePath = path.join(SCENARIOS_DIR, 'map_autosave_initial.json');
-    const intermediateSavePath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
-
-    if (!fs.existsSync(initialSavePath)) {
+    let loadPath = null;
+    const user = getAuthUser(req);
+    if (user) {
+        const playerDir = getPlayerScenariosDir(user.username);
+        const playerInitial = path.join(playerDir, 'initial.json');
+        if (fs.existsSync(playerInitial)) loadPath = playerInitial;
+    }
+    if (!loadPath) {
+        loadPath = path.join(SCENARIOS_DIR, 'map_autosave_initial.json');
+    }
+    if (!fs.existsSync(loadPath)) {
         return res.status(404).json({
             result: 'failure',
             msg: 'No saved game found to restart'
         });
     }
 
-    const savedState = JSON.parse(fs.readFileSync(initialSavePath, 'utf-8'));
-
-    // Reset the world state to initial positions (keep the same map)
-    const { worldState, physicalMap, config: savedConfig } = savedState;
-
-    // Update intermediate save with reset energy
-    const fullState = {
-        worldState,
-        physicalMap,
-        config: savedConfig || currentConfig,
-        totalEnergyConsumed: 0,
-        currentStep: 0,
-        mapRadius: savedState.mapRadius,
-        lastResult: null
-    };
-    fs.writeFileSync(intermediateSavePath, JSON.stringify(fullState, null, 2));
-
-    // Restore server state
-    serverWorldState = worldState;
-    serverPhysicalMap = physicalMap;
-    serverTotalEnergyConsumed = 0;
+    writeToLogFile(`[RESTART] Loading from ${loadPath}, user=${user?.username ?? 'anonymous'}`, 'info');
+    const result = performRestart(loadPath, req);
+    writeToLogFile(`[RESTART] Complete: copied initial to step_0`, 'info');
 
     res.json({
         msg: 'Game restarted with current map',
-        worldState,
-        physicalMap,
-        mapRadius: savedState.mapRadius
+        scenarioState: result.scenarioState,
+        physicalMap: result.physicalMap,
+        mapRadius: result.mapRadius
     });
 });
 
@@ -636,12 +974,12 @@ app.post('/api/undo', (req, res) => {
     currentStep = previousState.currentStep;
     lastGameOverMsg = isGameOver ? (previousState.lastResult?.msg || '') : '';
 
-    const { worldState, physicalMap, totalEnergyConsumed } = previousState;
+    const { scenarioState, physicalMap, totalEnergyConsumed } = previousState;
 
     // Update the intermediate save file
     const intermediateSavePath = path.join(SCENARIOS_DIR, 'map_autosave_intermediate.json');
     const fullState = {
-        worldState,
+        scenarioState,
         physicalMap,
         config: currentConfig,
         totalEnergyConsumed,
@@ -651,7 +989,7 @@ app.post('/api/undo', (req, res) => {
     fs.writeFileSync(intermediateSavePath, JSON.stringify(fullState, null, 2));
 
     // Restore server state
-    serverWorldState = worldState;
+    serverScenarioState = scenarioState;
     serverPhysicalMap = physicalMap;
     serverTotalEnergyConsumed = totalEnergyConsumed;
 
@@ -659,7 +997,7 @@ app.post('/api/undo', (req, res) => {
 
     res.json({
         msg: `Undone to step ${currentStep}`,
-        worldState,
+        scenarioState,
         physicalMap,
         totalEnergyConsumed,
         currentStep

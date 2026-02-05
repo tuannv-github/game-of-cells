@@ -5,14 +5,14 @@ import Sidebar from './components/Sidebar';
 import HexCell from './components/HexCell';
 import Minion from './components/Minion';
 import { useAuth } from './context/AuthContext';
-import { DEFAULT_CONFIG } from './config';
+import { DEFAULT_CONFIG, getGenerationConfig } from './config';
 import { moveMinion, evaluateCoverage } from './engine/simulation';
-import { generateWorld as generateWorldEngine } from './engine/generation';
+import { generateScenario } from './engine/generation';
 import { remoteLog } from './utils/logger';
 
 
 const GameApp = () => {
-    const { user, isGuest, login, register, logout } = useAuth();
+    const { user, isGuest, isAdmin, token, login, register, logout } = useAuth();
     const [showLoginModal, setShowLoginModal] = useState(false);
 
     const handleLoginFromGuest = useCallback(async (username, password) => {
@@ -26,23 +26,30 @@ const GameApp = () => {
     }, [register]);
 
     const [config, setConfig] = useState(() => {
-        const saved = localStorage.getItem('goc_config');
-        if (!saved) return DEFAULT_CONFIG;
-        try {
-            const parsed = JSON.parse(saved);
-            // Deep merge or at least top-level merge to ensure new keys like SIZE are available
-            const merged = { ...DEFAULT_CONFIG };
-            for (const key in parsed) {
-                if (typeof parsed[key] === 'object' && parsed[key] !== null && !Array.isArray(parsed[key])) {
-                    merged[key] = { ...merged[key], ...parsed[key] };
-                } else {
-                    merged[key] = parsed[key];
+        // Load generation config (scenario params); fallback to legacy goc_config
+        const genSaved = localStorage.getItem('goc_generationConfig') || localStorage.getItem('goc_config');
+        const viewSaved = localStorage.getItem('goc_viewConfig');
+        const merged = { ...DEFAULT_CONFIG };
+        if (genSaved) {
+            try {
+                const parsed = JSON.parse(genSaved);
+                for (const key in parsed) {
+                    if (key === 'difficulty') continue; // no longer in generation config
+                    if (typeof parsed[key] === 'object' && parsed[key] !== null && !Array.isArray(parsed[key])) {
+                        merged[key] = { ...merged[key], ...parsed[key] };
+                    } else {
+                        merged[key] = parsed[key];
+                    }
                 }
-            }
-            return merged;
-        } catch (e) {
-            return DEFAULT_CONFIG;
+            } catch (e) { /* use defaults */ }
         }
+        if (viewSaved) {
+            try {
+                const view = JSON.parse(viewSaved);
+                if (view.LAYER_OFFSETS) merged.LAYER_OFFSETS = { ...merged.LAYER_OFFSETS, ...view.LAYER_OFFSETS };
+            } catch (e) { /* use defaults */ }
+        }
+        return merged;
     });
     const [currentStep, setCurrentStep] = useState(() => {
         const saved = localStorage.getItem('goc_currentStep');
@@ -52,8 +59,8 @@ const GameApp = () => {
         const saved = localStorage.getItem('goc_totalEnergyConsumed');
         return saved ? parseFloat(saved) : 0;
     });
-    const [worldState, setWorldState] = useState(() => {
-        const saved = localStorage.getItem('goc_worldState');
+    const [scenarioState, setScenarioState] = useState(() => {
+        const saved = localStorage.getItem('goc_scenarioState');
         return saved ? JSON.parse(saved) : { levels: [], minions: [] };
     });
     const [status, setStatus] = useState('Standby');
@@ -63,10 +70,14 @@ const GameApp = () => {
     });
     const [showHint, setShowHint] = useState(false);
     const [mapRadius, setMapRadius] = useState(() => {
+        const view = localStorage.getItem('goc_viewConfig');
+        if (view) try { const v = JSON.parse(view); if (v.mapRadius != null) return v.mapRadius; } catch (e) {}
         const saved = localStorage.getItem('goc_mapRadius');
         return saved ? JSON.parse(saved) : 50;
     });
     const [layerVisibility, setLayerVisibility] = useState(() => {
+        const view = localStorage.getItem('goc_viewConfig');
+        if (view) try { const v = JSON.parse(view); if (v.layerVisibility) return v.layerVisibility; } catch (e) {}
         const saved = localStorage.getItem('goc_visibility');
         const defaults = {
             coverage: true,
@@ -90,19 +101,24 @@ const GameApp = () => {
 
     const [mapList, setMapList] = useState([]);
     const orbitRef = useRef();
+    const configRef = useRef(config);
+    configRef.current = config;
 
-    // Persist settings to localStorage
+    // Persist settings to localStorage (split: generation vs viewing)
     useEffect(() => {
-        localStorage.setItem('goc_config', JSON.stringify(config));
+        localStorage.setItem('goc_generationConfig', JSON.stringify(getGenerationConfig(config)));
     }, [config]);
 
     useEffect(() => {
-        localStorage.setItem('goc_visibility', JSON.stringify(layerVisibility));
-    }, [layerVisibility]);
+        const prev = localStorage.getItem('goc_viewConfig');
+        let viewConfig = { layerVisibility, mapRadius, LAYER_OFFSETS: config.LAYER_OFFSETS };
+        if (prev) try { const p = JSON.parse(prev); if (p.camera) viewConfig.camera = p.camera; } catch (e) {}
+        localStorage.setItem('goc_viewConfig', JSON.stringify(viewConfig));
+    }, [layerVisibility, mapRadius, config.LAYER_OFFSETS]);
 
     useEffect(() => {
-        if (worldState) localStorage.setItem('goc_worldState', JSON.stringify(worldState));
-    }, [worldState]);
+        if (scenarioState) localStorage.setItem('goc_scenarioState', JSON.stringify(scenarioState));
+    }, [scenarioState]);
 
     useEffect(() => {
         if (physicalMap) localStorage.setItem('goc_physicalMap', JSON.stringify(physicalMap));
@@ -116,15 +132,7 @@ const GameApp = () => {
         localStorage.setItem('goc_totalEnergyConsumed', (totalEnergyConsumed || 0).toString());
     }, [totalEnergyConsumed]);
 
-    useEffect(() => {
-        localStorage.setItem('goc_mapRadius', JSON.stringify(mapRadius));
-    }, [mapRadius]);
-
-    useEffect(() => {
-        localStorage.setItem('goc_currentStep', currentStep.toString());
-    }, [currentStep]);
-
-    // Handle Camera View persistence
+    // Handle Camera View persistence (stored in goc_viewConfig)
     const handleCameraChange = useCallback((e) => {
         if (!orbitRef.current) return;
         const camera = orbitRef.current.object;
@@ -133,11 +141,15 @@ const GameApp = () => {
             position: [camera.position.x, camera.position.y, camera.position.z],
             target: [target.x, target.y, target.z]
         };
-        localStorage.setItem('goc_camera', JSON.stringify(cameraState));
+        const view = localStorage.getItem('goc_viewConfig');
+        let viewConfig = view ? (() => { try { return JSON.parse(view); } catch (e) { return {}; } })() : {};
+        viewConfig.camera = cameraState;
+        localStorage.setItem('goc_viewConfig', JSON.stringify(viewConfig));
     }, []);
 
     useEffect(() => {
-        const savedCamera = localStorage.getItem('goc_camera');
+        const view = localStorage.getItem('goc_viewConfig');
+        const savedCamera = view ? (() => { try { const v = JSON.parse(view); return v.camera ? JSON.stringify(v.camera) : null; } catch (e) { return null; } })() : localStorage.getItem('goc_camera');
         remoteLog(`[UI] Initializing Camera Restoration. Saved state: ${savedCamera ? 'YES' : 'NO'}, Ref ready: ${orbitRef.current ? 'YES' : 'NO'}`);
         if (savedCamera && orbitRef.current) {
             try {
@@ -168,12 +180,20 @@ const GameApp = () => {
     const [autoSync, setAutoSync] = useState(true);
     const [lastApiStepResult, setLastApiStepResult] = useState(null);
 
+    const getAuthHeaders = useCallback(() => {
+        const authToken = token || localStorage.getItem('goc_token');
+        const headers = { 'Content-Type': 'application/json' };
+        if (authToken) headers.Authorization = `Bearer ${authToken}`;
+        return headers;
+    }, [token]);
+
     const fetchApiState = useCallback(async () => {
         try {
-            const response = await fetch('/api/player/get-state');
+            const response = await fetch('/api/player/get-state', { headers: getAuthHeaders() });
             const data = await response.json();
-            if (data.worldState) {
-                setWorldState(data.worldState);
+            const state = data.scenarioState ?? data.worldState;
+            if (state) {
+                setScenarioState(state);
                 if (data.physicalMap) setPhysicalMap(data.physicalMap);
                 if (data.config) setConfig(data.config);
                 if (data.lastResult) setLastApiStepResult(data.lastResult);
@@ -188,7 +208,7 @@ const GameApp = () => {
         } catch (err) {
             remoteLog(`[API] Sync failed: ${err.message}`, 'error');
         }
-    }, [setConfig, setCurrentStep, setTotalEnergyConsumed]);
+    }, [getAuthHeaders]);
 
     useEffect(() => {
         let interval;
@@ -198,39 +218,116 @@ const GameApp = () => {
         return () => clearInterval(interval);
     }, [autoSync, fetchApiState]);
 
+    // On login (non-guest, useBackend): init player scenario (create dir, copy easy if new user, load into server)
+    useEffect(() => {
+        if (!user || isGuest || !useBackend) return;
+        const initPlayer = async () => {
+            try {
+                const response = await fetch('/api/player/init', {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    const state = data.scenarioState ?? data.worldState;
+                    if (state) {
+                        setScenarioState(state);
+                        if (data.physicalMap) setPhysicalMap(data.physicalMap);
+                        if (data.config) setConfig(prev => ({ ...prev, ...data.config }));
+                        if (data.mapRadius != null) setMapRadius(data.mapRadius);
+                        setCurrentStep(data.currentStep ?? 0);
+                        setTotalEnergyConsumed(data.totalEnergyConsumed ?? 0);
+                        setStatus(`Scenario loaded (step ${data.currentStep ?? 0})`);
+                        remoteLog('[API] Player scenario initialized');
+                    }
+                }
+            } catch (err) {
+                remoteLog(`[API] Init failed: ${err.message}`, 'error');
+            }
+        };
+        initPlayer();
+    }, [user?.id, isGuest, useBackend, getAuthHeaders]); // Run when user logs in
+
     const handleToggleAutoSync = () => {
         setAutoSync(prev => !prev);
         if (!autoSync) {
             remoteLog('[API] Auto-sync enabled. Polling server state...');
         }
     };
-    // Initialize world on mount
-    // Initialize world on mount - REMOVED to prevent auto-generation on reload
 
-    const generateWorld = useCallback(async (resetMap = false) => {
-        if (useBackend) {
-            remoteLog('[API] Generating world via backend...');
+    const fetchMapList = useCallback(async () => {
+        try {
+            const response = await fetch('/api/maps', { headers: getAuthHeaders() });
+            if (response.ok) {
+                const list = await response.json();
+                setMapList(list);
+            } else if (response.status === 401) {
+                setMapList([]);
+                remoteLog('[UI] Log in to view your saved scenarios.');
+            }
+        } catch (error) {
+            remoteLog(`[ERROR] Failed to fetch map list: ${error.message}`);
+        }
+    }, [getAuthHeaders]);
+
+    const saveScenarioToServer = useCallback(async (filename, scenarioData) => {
+        const name = filename.endsWith('.json') ? filename : `${filename}.json`;
+        try {
+            const response = await fetch('/api/maps', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ name, data: scenarioData })
+            });
+            if (response.ok) {
+                remoteLog(`[UI] Scenario saved to server as ${name}`);
+                fetchMapList();
+            } else {
+                const err = await response.json().catch(() => ({}));
+                remoteLog(`[ERROR] ${err.error || 'Failed to save map to server.'}`);
+            }
+        } catch (error) {
+            remoteLog(`[ERROR] Server save error: ${error.message}`);
+        }
+    }, [fetchMapList, getAuthHeaders]);
+
+    // Initialize scenario on mount - REMOVED to prevent auto-generation on reload
+    const generateScenario = useCallback(async (resetMap = false) => {
+        if (useBackend && isAdmin) {
+            remoteLog('[API] Generating scenario via backend...');
+            const authToken = token || localStorage.getItem('goc_token');
+            if (!authToken) {
+                setStatus('Error: Please log in as admin to generate');
+                remoteLog('[ERROR] No auth token. Log in as admin.', 'error');
+                return;
+            }
             try {
-                // First sync config to backend
-                await fetch('/api/config', {
+                const genConfig = getGenerationConfig(configRef.current);
+                const resp = await fetch('/api/generate', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(config)
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({ config: genConfig })
                 });
-
-                // Then trigger generation
-                const resp = await fetch('/api/generate', { method: 'POST' });
                 const data = await resp.json();
 
-                if (data.worldState) {
-                    setWorldState(data.worldState);
+                if (!resp.ok) {
+                    const msg = data.error || 'Generation failed';
+                    setStatus(`Error: ${msg}`);
+                    remoteLog(`[ERROR] ${msg}`, 'error');
+                    return;
+                }
+                const state = data.scenarioState ?? data.worldState;
+                if (state) {
+                    setScenarioState(state);
                     setPhysicalMap(data.physicalMap);
                     setMapRadius(data.mapRadius);
                     setCurrentStep(0);
                     setTotalEnergyConsumed(0);
                     setLastApiStepResult(null);
                     setStatus('New Backend Simulation Started');
-                    remoteLog(`[API] Generated: ${data.worldState.levels.length} levels, ${data.worldState.minions.length} minions.`);
+                    remoteLog(`[API] Generated: ${state.levels.length} levels, ${state.minions.length} minions.`);
                 }
             } catch (err) {
                 remoteLog(`[ERROR] Backend generation failed: ${err.message}`, 'error');
@@ -244,8 +341,8 @@ const GameApp = () => {
             error: (msg) => remoteLog(msg, 'error')
         };
 
-        const { worldState: newWorldState, physicalMap: newPhysicalMap, mapRadius: newRadius } = generateWorldEngine(
-            config,
+        const { scenarioState: newScenarioState, physicalMap: newPhysicalMap, mapRadius: newRadius } = generateScenario(
+            configRef.current,
             physicalMap,
             resetMap,
             logger
@@ -253,30 +350,30 @@ const GameApp = () => {
 
         setMapRadius(newRadius);
         setPhysicalMap(newPhysicalMap);
-        setWorldState(newWorldState);
+        setScenarioState(newScenarioState);
 
         // Immediate evaluation after generation
-        const { minionStates } = evaluateCoverage(newWorldState.minions, newWorldState.levels, config);
-        setWorldState(prev => ({ ...prev, minions: minionStates }));
+        const { minionStates } = evaluateCoverage(newScenarioState.minions, newScenarioState.levels, configRef.current);
+        setScenarioState(prev => ({ ...prev, minions: minionStates }));
 
         setCurrentStep(0);
         setStatus('New Simulation Started');
-        remoteLog(`[SIM] Simulation Initialized: ${newWorldState.levels.length} levels, ${newWorldState.minions.length} minions.`);
+        remoteLog(`[SIM] Simulation Initialized: ${newScenarioState.levels.length} levels, ${newScenarioState.minions.length} minions.`);
         setShowHint(false);
-    }, [config, physicalMap, useBackend]);
+    }, [config, physicalMap, useBackend, isAdmin, token]);
 
 
     // Reactive coverage update
     useEffect(() => {
-        if (worldState.levels.length > 0) {
+        if (scenarioState.levels.length > 0) {
             remoteLog(`[SIM] Re-evaluating coverage due to config change...`);
-            const { minionStates } = evaluateCoverage(worldState.minions, worldState.levels, config);
-            setWorldState(prev => ({ ...prev, minions: minionStates }));
+            const { minionStates } = evaluateCoverage(scenarioState.minions, scenarioState.levels, config);
+            setScenarioState(prev => ({ ...prev, minions: minionStates }));
         }
-    }, [worldState.levels, config.CAPACITY_CELL_RADIUS, config.COVERAGE_CELL_RADIUS]);
+    }, [scenarioState.levels, config.CAPACITY_CELL_RADIUS, config.COVERAGE_CELL_RADIUS]);
 
     const toggleCell = (levelId, cellId) => {
-        setWorldState(prev => ({
+        setScenarioState(prev => ({
             ...prev,
             levels: prev.levels.map(l => l.id === levelId ? {
                 ...l,
@@ -289,10 +386,10 @@ const GameApp = () => {
     const saveScenario = () => {
         const scenarioData = {
             timestamp: new Date().toISOString(),
-            config: config,
-            world: {
-                levels: worldState.levels,
-                minions: worldState.minions
+            config: getGenerationConfig(config),
+            scenarioState: {
+                levels: scenarioState.levels,
+                minions: scenarioState.minions
             },
             physicalMap: physicalMap
         };
@@ -313,9 +410,18 @@ const GameApp = () => {
         reader.onload = (e) => {
             try {
                 const data = JSON.parse(e.target.result);
-                if (data.config && data.world && data.physicalMap) {
-                    setConfig(data.config);
-                    setWorldState(data.world);
+                if (data.config && (data.scenarioState || data.world) && data.physicalMap) {
+                    const merged = { ...DEFAULT_CONFIG };
+                    for (const key in data.config) {
+                        if (key === 'difficulty') continue;
+                        if (typeof data.config[key] === 'object' && data.config[key] !== null && !Array.isArray(data.config[key])) {
+                            merged[key] = { ...merged[key], ...data.config[key] };
+                        } else {
+                            merged[key] = data.config[key];
+                        }
+                    }
+                    setConfig(merged);
+                    setScenarioState(data.scenarioState || data.world);
                     setPhysicalMap(data.physicalMap);
 
                     // Recalculate radius if needed or trust the loaded config
@@ -337,59 +443,38 @@ const GameApp = () => {
         reader.readAsText(file);
     };
 
-    const fetchMapList = async () => {
-        try {
-            const response = await fetch('/api/maps');
-            if (response.ok) {
-                const list = await response.json();
-                setMapList(list);
-            }
-        } catch (error) {
-            remoteLog(`[ERROR] Failed to fetch map list: ${error.message}`);
-        }
-    };
-
-    const saveToServer = async () => {
-        const name = prompt('Enter a name for this map scenario:', `scenario_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
+    const saveToServer = useCallback(async () => {
+        const name = prompt('Enter a name for this scenario:', `scenario_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
         if (!name) return;
-
         const scenarioData = {
             timestamp: new Date().toISOString(),
-            config: config,
-            world: {
-                levels: worldState.levels,
-                minions: worldState.minions
-            },
+            config: getGenerationConfig(config),
+            scenarioState: { levels: scenarioState.levels, minions: scenarioState.minions },
             physicalMap: physicalMap
         };
+        await saveScenarioToServer(name.endsWith('.json') ? name : `${name}.json`, scenarioData);
+    }, [config, scenarioState, physicalMap, saveScenarioToServer]);
 
+    const saveToServerAs = useCallback(async (difficulty) => {
+        const scenarioData = {
+            timestamp: new Date().toISOString(),
+            config: getGenerationConfig(config),
+            scenarioState: { levels: scenarioState.levels, minions: scenarioState.minions },
+            physicalMap: physicalMap
+        };
+        await saveScenarioToServer(difficulty, scenarioData);
+        setStatus(`Saved as ${difficulty}`);
+    }, [config, scenarioState, physicalMap, saveScenarioToServer]);
+
+    const loadFromServer = useCallback(async (filename) => {
         try {
-            const response = await fetch('/api/maps', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: name.endsWith('.json') ? name : `${name}.json`, data: scenarioData })
-            });
-
-            if (response.ok) {
-                remoteLog(`[UI] Map saved to server as ${name}`);
-                fetchMapList(); // Refresh list
-            } else {
-                remoteLog('[ERROR] Failed to save map to server.');
-            }
-        } catch (error) {
-            remoteLog(`[ERROR] Server save error: ${error.message}`);
-        }
-    };
-
-    const loadFromServer = async (filename) => {
-        try {
-            const response = await fetch(`/api/maps/${filename}`);
+            const response = await fetch(`/api/maps/${filename}`, { headers: getAuthHeaders() });
             if (response.ok) {
                 const data = await response.json();
-                if (data.config && data.world && data.physicalMap) {
-                    // Merge loaded config with DEFAULT_CONFIG to ensure new keys exist
+                if (data.config && (data.scenarioState || data.world) && data.physicalMap) {
                     const mergedConfig = { ...DEFAULT_CONFIG };
                     for (const key in data.config) {
+                        if (key === 'difficulty') continue;
                         if (typeof data.config[key] === 'object' && data.config[key] !== null && !Array.isArray(data.config[key])) {
                             mergedConfig[key] = { ...mergedConfig[key], ...data.config[key] };
                         } else {
@@ -397,16 +482,16 @@ const GameApp = () => {
                         }
                     }
                     setConfig(mergedConfig);
-                    setWorldState(data.world);
+                    setScenarioState(data.scenarioState || data.world);
                     setPhysicalMap(data.physicalMap);
 
                     const numCoverage = Math.max(0, data.config.COVERAGE_CELL_RADIUS > 0 ? data.config.COVERAGE_CELLS_COUNT : 0);
                     const totalCoverageArea = numCoverage * Math.PI * Math.pow(data.config.COVERAGE_CELL_RADIUS, 2);
                     const areaBasedRadius = Math.sqrt(totalCoverageArea / Math.PI);
-                    setMapRadius(Math.max(80, areaBasedRadius * 1.2));
-
-                    setCurrentStep(0);
-                    setStatus(`Loaded: ${filename}`);
+                    setMapRadius(data.mapRadius ?? Math.max(80, areaBasedRadius * 1.2));
+                    setCurrentStep(data.currentStep ?? 0);
+                    setTotalEnergyConsumed(data.totalEnergyConsumed ?? 0);
+                    setStatus(`Loaded: ${filename} (step ${data.currentStep ?? 0})`);
                     remoteLog(`[UI] Loaded map from server: ${filename}`);
                 }
             } else {
@@ -415,12 +500,12 @@ const GameApp = () => {
         } catch (error) {
             remoteLog(`[ERROR] Server load error: ${error.message}`);
         }
-    };
+    }, [getAuthHeaders]);
 
-    const deleteFromServer = async (filename) => {
+    const deleteFromServer = useCallback(async (filename) => {
         if (!window.confirm(`Are you sure you want to delete ${filename}?`)) return;
         try {
-            const response = await fetch(`/api/maps/${filename}`, { method: 'DELETE' });
+            const response = await fetch(`/api/maps/${filename}`, { method: 'DELETE', headers: getAuthHeaders() });
             if (response.ok) {
                 remoteLog(`[UI] Deleted map from server: ${filename}`);
                 fetchMapList(); // Refresh list
@@ -430,27 +515,27 @@ const GameApp = () => {
         } catch (error) {
             remoteLog(`[ERROR] Server delete error: ${error.message}`);
         }
-    };
+    }, [getAuthHeaders, fetchMapList]);
 
     const nextStep = async () => {
-        if (worldState.levels.length === 0) return;
+        if (scenarioState.levels.length === 0) return;
 
         if (useBackend) {
             remoteLog('[API] Executing next step via backend...');
             try {
                 // Calculate the list of cells that are currently ON
-                const activeCellIds = worldState.levels.flatMap(level =>
+                const activeCellIds = scenarioState.levels.flatMap(level =>
                     level.cells.filter(cell => cell.active).map(cell => cell.id)
                 );
 
                 const response = await fetch('/api/player/step', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({ on: activeCellIds })
                 });
                 const data = await response.json();
-                if (data.worldState) {
-                    setWorldState(data.worldState);
+                if (data.scenarioState) {
+                    setScenarioState(data.scenarioState);
                     if (data.currentStep !== undefined) setCurrentStep(data.currentStep);
                     setTotalEnergyConsumed(data.totalEnergyConsumed);
 
@@ -484,10 +569,10 @@ const GameApp = () => {
             return;
         }
 
-        const { minionStates, failure } = evaluateCoverage(worldState.minions, worldState.levels, config);
+        const { minionStates, failure } = evaluateCoverage(scenarioState.minions, scenarioState.levels, config);
         const movedMinions = minionStates.map(m => moveMinion(m, config, physicalMap));
 
-        setWorldState(prev => ({ ...prev, minions: movedMinions }));
+        setScenarioState(prev => ({ ...prev, minions: movedMinions }));
         setCurrentStep(prev => prev + 1);
         const stepMsg = failure ? `ALERT: ${failure}` : `Step ${currentStep + 1} Success`;
         setStatus(stepMsg);
@@ -500,12 +585,12 @@ const GameApp = () => {
             remoteLog('[API] Restarting game...');
             const response = await fetch('/api/restart', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: getAuthHeaders()
             });
             const data = await response.json();
 
-            if (data.worldState) {
-                setWorldState(data.worldState);
+            if (data.scenarioState) {
+                setScenarioState(data.scenarioState);
                 setPhysicalMap(data.physicalMap);
                 setMapRadius(data.mapRadius);
                 setCurrentStep(0);
@@ -519,17 +604,59 @@ const GameApp = () => {
         }
     };
 
+    const changeDifficulty = async (difficulty) => {
+        try {
+            remoteLog(`[API] Changing difficulty to ${difficulty}...`);
+            const response = await fetch('/api/player/change-difficulty', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ difficulty })
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                setStatus(data.error || 'Failed to change difficulty');
+                remoteLog(`[ERROR] ${data.error || 'Change difficulty failed'}`, 'error');
+                return;
+            }
+            if (data.scenarioState) {
+                if (data.config) {
+                    const merged = { ...DEFAULT_CONFIG };
+                    for (const key in data.config) {
+                        if (key === 'difficulty') continue;
+                        if (typeof data.config[key] === 'object' && data.config[key] !== null && !Array.isArray(data.config[key])) {
+                            merged[key] = { ...merged[key], ...data.config[key] };
+                        } else {
+                            merged[key] = data.config[key];
+                        }
+                    }
+                    setConfig(merged);
+                }
+                setScenarioState(data.scenarioState);
+                setPhysicalMap(data.physicalMap);
+                setMapRadius(data.mapRadius);
+                setCurrentStep(0);
+                setTotalEnergyConsumed(0);
+                setStatus(`Loaded ${difficulty}`);
+                setLastApiStepResult(null);
+                remoteLog(`[API] Difficulty changed to ${difficulty}`);
+            }
+        } catch (err) {
+            remoteLog(`[ERROR] Change difficulty failed: ${err.message}`, 'error');
+        }
+    };
+
     const undoStep = async () => {
         try {
             remoteLog('[API] Undoing last step...');
             const response = await fetch('/api/undo', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: getAuthHeaders()
             });
             const data = await response.json();
 
-            if (data.worldState) {
-                setWorldState(data.worldState);
+            if (data.scenarioState) {
+                setScenarioState(data.scenarioState);
                 if (data.physicalMap) setPhysicalMap(data.physicalMap);
                 setCurrentStep(data.currentStep);
                 setTotalEnergyConsumed(data.totalEnergyConsumed);
@@ -545,34 +672,37 @@ const GameApp = () => {
         }
     };
 
-    // Auto-load latest map on startup
+    // Auto-load on startup: guests get 401 -> generate locally; logged-in with useBackend -> init effect loads
     useEffect(() => {
+        if (user && !isGuest && useBackend) return; // init effect handles logged-in users
         const init = async () => {
             try {
-                const response = await fetch('/api/maps');
+                const response = await fetch('/api/maps', { headers: getAuthHeaders() });
                 if (response.ok) {
                     const list = await response.json();
                     if (list && list.length > 0) {
-                        // Sort by name descending to get the latest timestamp
-                        list.sort((a, b) => b.localeCompare(a));
-                        const latest = list[0];
-                        remoteLog(`[INIT] Auto-loading latest scenario: ${latest}`);
+                        const stepFiles = list.filter(f => /^step_\d+\.json$/.test(f));
+                        const latest = stepFiles.length > 0
+                            ? stepFiles.sort((a, b) => parseInt(b.replace(/\D/g, ''), 10) - parseInt(a.replace(/\D/g, ''), 10))[0]
+                            : list.includes('initial.json') ? 'initial.json' : list[0];
+                        remoteLog(`[INIT] Auto-loading scenario: ${latest}`);
                         await loadFromServer(latest);
-                        setMapList(list); // Also populate the list
+                        setMapList(list);
                     } else {
-                        // No maps available on server - generate a world locally
-                        remoteLog('[INIT] No server maps found — generating local world.');
-                        generateWorld(true);
+                        remoteLog('[INIT] No maps — generating local scenario.');
+                        generateScenario(true);
                     }
+                } else if (response.status === 401) {
+                    remoteLog('[INIT] Guest — generating local scenario.');
+                    generateScenario(true);
                 }
             } catch (e) {
                 remoteLog(`[ERROR] Auto-load failed: ${e.message}`);
-                // If auto-load fails (no server), generate a local world so UI isn't empty
-                generateWorld(true);
+                if (scenarioState.levels.length === 0) generateScenario(true);
             }
         };
         init();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps -- run once on mount
 
     return (
         <div className="app-container">
@@ -600,7 +730,7 @@ const GameApp = () => {
                     )}
 
                     <group>
-                        {worldState.levels.map((level, lIndex) => {
+                        {scenarioState.levels.map((level, lIndex) => {
                             const baseY = lIndex * config.LEVEL_DISTANCE;
 
                             const isGameOver = !!lastApiStepResult?.failure;
@@ -766,7 +896,7 @@ const GameApp = () => {
 
                                     {/* 4. Minion Layer (Y=1.5) */}
                                     <group visible={layerVisibility.minions}>
-                                        {worldState.minions
+                                        {scenarioState.minions
                                             .filter(m => m.level === lIndex && layerVisibility[`minion_${m.type.toUpperCase()}`] !== false)
                                             .map(minion => (
                                                 <Minion
@@ -796,6 +926,7 @@ const GameApp = () => {
             <Sidebar
                 user={user}
                 isGuest={isGuest}
+                isAdmin={isAdmin}
                 onLogout={logout}
                 onShowLogin={isGuest ? () => setShowLoginModal(true) : undefined}
                 showLoginModal={showLoginModal}
@@ -805,7 +936,7 @@ const GameApp = () => {
                 config={config}
                 setConfig={setConfig}
                 currentStep={currentStep}
-                onGenerate={() => generateWorld(true)}
+                onGenerate={() => generateScenario(true)}
                 onStep={nextStep}
                 onHint={() => {
                     setShowHint(!showHint);
@@ -813,11 +944,13 @@ const GameApp = () => {
                 }}
                 onSave={saveScenario}
                 onSaveServer={saveToServer}
+                onSaveServerAs={saveToServerAs}
                 onLoad={loadScenario}
                 onLoadServer={loadFromServer}
                 onDeleteServer={deleteFromServer}
                 onReset={resetSettings}
                 onRestart={restartGame}
+                onChangeDifficulty={changeDifficulty}
                 onUndo={undoStep}
                 mapList={mapList}
                 onFetchMaps={fetchMapList}

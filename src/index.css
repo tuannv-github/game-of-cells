@@ -84,6 +84,13 @@ html,
     color: var(--accent-color);
 }
 
+.btn:disabled,
+.btn-outline:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .separator {
     height: 1px;
     background: var(--border-color);
@@ -199,6 +206,25 @@ section h3 {
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.config-section-compact section h3 {
+    margin: 6px 0 4px 0;
+}
+
+.config-section-compact .config-group {
+    margin-bottom: 8px;
+}
+
+.config-section-compact .minion-config-row {
+    margin-bottom: 8px;
+}
+
+.config-section-compact section h3.collapsible {
+    cursor: pointer;
+}
+.config-section-compact section h3.collapsible:hover {
+    color: var(--accent-color);
 }
 
 .legend-section {

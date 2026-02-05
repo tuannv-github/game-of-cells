@@ -42,6 +42,6 @@
     "vite": "^5.0.0"
   },
   "nodemonConfig": {
-    "ignore": ["logs/*", "scenarios/*"]
+    "ignore": ["logs/*", "scenarios/*", "scenarios_admin/*"]
   }
 }
