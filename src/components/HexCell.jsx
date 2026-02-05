@@ -3,7 +3,7 @@ import React, { useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { Text } from '@react-three/drei';
 
-const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = false, isGameOver = false, showCoverage = false, capacityConsumed = 0, showCellLoad = false }) => {
+const HexCell = React.memo(({ position, type, active, onClick, onToggleCell, levelId, cellId, serviceRadius, shouldBeOn = false, isGameOver = false, showCoverage = false, capacityConsumed = 0, showCellLoad = false }) => {
     const meshRef = useRef();
 
     const hexShape = useMemo(() => {
@@ -19,6 +19,8 @@ const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = 
         shape.closePath();
         return shape;
     }, [serviceRadius]);
+
+    const extrudeGeometry = useMemo(() => new THREE.ExtrudeGeometry(hexShape, { depth: 0.05, bevelEnabled: false }), [hexShape]);
 
     // Determine color based on state
     const getColor = () => {
@@ -44,7 +46,8 @@ const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = 
                 rotation={[-Math.PI / 2, 0, Math.PI / 6]}
                 onClick={(e) => {
                     e.stopPropagation();
-                    onClick();
+                    if (onToggleCell && levelId != null && cellId != null) onToggleCell(levelId, cellId);
+                    else if (onClick) onClick();
                 }}
                 ref={meshRef}
             >
@@ -62,7 +65,7 @@ const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = 
 
             {/* Cell Border/Outline */}
             <lineSegments rotation={[-Math.PI / 2, 0, Math.PI / 6]} position={[0, 0.03, 0]}>
-                <edgesGeometry args={[new THREE.ExtrudeGeometry(hexShape, { depth: 0.05, bevelEnabled: false })]} />
+                <edgesGeometry args={[extrudeGeometry]} />
                 <lineBasicMaterial color={active ? "white" : "#ffffff"} transparent opacity={active ? 0.8 : 0.3} />
             </lineSegments>
 
@@ -95,7 +98,7 @@ const HexCell = ({ position, type, active, onClick, serviceRadius, shouldBeOn = 
             )}
         </group>
     );
-};
+});
 
 // Simplified coordinate helper
 export const getHexPosition = (q, r, radius) => {

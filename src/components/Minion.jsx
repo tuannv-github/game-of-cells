@@ -9,7 +9,7 @@ const TRAIL_SEGMENTS = 12;
 // Spring config: meteor-like (fast start, smooth deceleration, no bounce)
 const METEOR_CONFIG = { mass: 1, tension: 180, friction: 24, precision: 0.0001 };
 
-const Minion = ({ position, type, color, label, size = 1.0, isUncovered = false, maxMove = 6, showRange = true, currentStep = 0 }) => {
+const Minion = React.memo(({ position, type, color, label, size = 1.0, isUncovered = false, maxMove = 6, showRange = true, currentStep = 0 }) => {
     const meshRef = useRef();
     const groupRef = useRef();
     const startPos = useRef(new THREE.Vector3(position[0], position[1], position[2]));
@@ -160,6 +160,6 @@ const Minion = ({ position, type, color, label, size = 1.0, isUncovered = false,
             </Text>
         </animated.group>
     );
-};
+});
 
 export default Minion;

@@ -18,6 +18,13 @@ const getMinionLabel = (minion) => {
     return `${prefix}${idx}`;
 };
 
+const LAYER_VISIBILITY_DEFAULTS = {
+    coverage: true, capacity: true, cellLoad: true, minions: true, axes: true,
+    zone_HUMAN: true, zone_HUMANOID: true, zone_DOG_ROBOT: true, zone_TURTLE_BOT: true, zone_DRONE: true, zone_PORTAL: true,
+    minion_HUMAN: true, minion_HUMANOID: true, minion_DOG_ROBOT: true, minion_TURTLE_BOT: true, minion_DRONE: true,
+    minionRange: true
+};
+
 const GameApp = () => {
     const { user, isGuest, isAdmin, token, login, register, logout } = useAuth();
     const [showLoginModal, setShowLoginModal] = useState(false);
@@ -82,30 +89,11 @@ const GameApp = () => {
         const saved = localStorage.getItem('goc_mapRadius');
         return saved ? JSON.parse(saved) : 50;
     });
-    const layerVisibilityDefaults = {
-        coverage: true,
-        capacity: true,
-        cellLoad: true,
-        minions: true,
-        axes: true,
-        zone_HUMAN: true,
-        zone_HUMANOID: true,
-        zone_DOG_ROBOT: true,
-        zone_TURTLE_BOT: true,
-        zone_DRONE: true,
-        zone_PORTAL: true,
-        minion_HUMAN: true,
-        minion_HUMANOID: true,
-        minion_DOG_ROBOT: true,
-        minion_TURTLE_BOT: true,
-        minion_DRONE: true,
-        minionRange: true
-    };
     const [layerVisibility, setLayerVisibility] = useState(() => {
         const view = localStorage.getItem('goc_viewConfig');
-        if (view) try { const v = JSON.parse(view); if (v.layerVisibility) return { ...layerVisibilityDefaults, ...v.layerVisibility }; } catch (e) {}
+        if (view) try { const v = JSON.parse(view); if (v.layerVisibility) return { ...LAYER_VISIBILITY_DEFAULTS, ...v.layerVisibility }; } catch (e) {}
         const saved = localStorage.getItem('goc_visibility');
-        return saved ? { ...layerVisibilityDefaults, ...JSON.parse(saved) } : layerVisibilityDefaults;
+        return saved ? { ...LAYER_VISIBILITY_DEFAULTS, ...JSON.parse(saved) } : { ...LAYER_VISIBILITY_DEFAULTS };
     });
 
     const [mapList, setMapList] = useState([]);
@@ -438,7 +426,7 @@ const GameApp = () => {
         }
     }, [scenarioState.levels, config.CAPACITY_CELL_RADIUS, config.COVERAGE_CELL_RADIUS]);
 
-    const toggleCell = (levelId, cellId) => {
+    const toggleCell = useCallback((levelId, cellId) => {
         setScenarioState(prev => ({
             ...prev,
             levels: prev.levels.map(l => l.id === levelId ? {
@@ -447,7 +435,7 @@ const GameApp = () => {
             } : l)
         }));
         remoteLog(`[UI] Cell toggled: ${cellId} at level ${levelId}`);
-    };
+    }, []);
 
     const saveScenario = () => {
         const scenarioData = {
@@ -953,8 +941,10 @@ const GameApp = () => {
                                                 position={[cell.x, 0, cell.z]}
                                                 type={cell.type}
                                                 active={cell.active}
+                                                onToggleCell={toggleCell}
+                                                levelId={level.id}
+                                                cellId={cell.id}
                                                 serviceRadius={config.COVERAGE_CELL_RADIUS}
-                                                onClick={() => toggleCell(level.id, cell.id)}
                                                 shouldBeOn={cell.shouldBeOn}
                                                 isGameOver={isGameOver}
                                                 capacityConsumed={cell.capacityConsumed}
@@ -971,8 +961,10 @@ const GameApp = () => {
                                                 position={[cell.x, 0, cell.z]}
                                                 type={cell.type}
                                                 active={cell.active}
+                                                onToggleCell={toggleCell}
+                                                levelId={level.id}
+                                                cellId={cell.id}
                                                 serviceRadius={config.CAPACITY_CELL_RADIUS}
-                                                onClick={() => toggleCell(level.id, cell.id)}
                                                 shouldBeOn={cell.shouldBeOn}
                                                 isGameOver={isGameOver}
                                                 capacityConsumed={cell.capacityConsumed}
