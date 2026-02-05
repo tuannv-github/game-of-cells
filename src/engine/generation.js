@@ -1,4 +1,5 @@
 import { CELL_TYPES } from '../config.js';
+import { getCoveringCellForPosition, getLoadOnCoverageCell } from './simulation.js';
 
 // Simplified coordinate helper (shared with HexCell)
 export const getHexPosition = (q, r, radius) => {
@@ -304,25 +305,25 @@ export const generateScenario = (config, physicalMap = null, resetMap = true, lo
                 }
                 if (insideExclusion) continue;
 
-                // 2. Coverage Check (Must be in at least 1 cell) — circle
-                const coveringCells = levelCells.filter(cell => {
-                    const dx = mx - cell.x;
-                    const dz = mz - cell.z;
-                    const radius = cell.type === CELL_TYPES.COVERAGE ? covSpacing : capSpacing;
-                    const dist = Math.sqrt(dx * dx + dz * dz);
-                    return dist < radius;
-                });
+                // 2. Coverage Check: capacity first, then coverage (must be covered by a cell)
+                const levelData = { id: assignedLevel, cells: levelCells };
+                const levelsForCheck = [levelData];
+                const serving = getCoveringCellForPosition(mx, mz, assignedLevel, levelsForCheck, config);
 
-                if (coveringCells.length > 0) {
-                    validPosition = true;
-
-                    // 3. Activation Logic
-                    const capProvider = coveringCells.find(c => c.type === CELL_TYPES.CAPACITY);
-                    if (capProvider) {
-                        capProvider.active = true;
+                if (serving) {
+                    // 3. If coverage cell: check overload before accepting
+                    const CELL_LIMIT = config.COVERAGE_LIMIT_MBPS || 100;
+                    if (serving.isCapacity) {
+                        validPosition = true;
+                        serving.cell.active = true;
                     } else {
-                        const covProvider = coveringCells.find(c => c.type === CELL_TYPES.COVERAGE);
-                        if (covProvider) covProvider.active = true;
+                        const existingLoad = getLoadOnCoverageCell(serving.cell.id, newMinions, null, levelsForCheck, config);
+                        const reqThroughput = mConfig.REQ_THROUGHPUT || 0;
+                        const load = existingLoad + reqThroughput;
+                        if (load <= CELL_LIMIT) {
+                            validPosition = true;
+                            serving.cell.active = true;
+                        }
                     }
                 }
             }

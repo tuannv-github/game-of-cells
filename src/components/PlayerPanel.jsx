@@ -170,12 +170,15 @@ const PlayerPanel = ({
                         <span>Capacity Cell (OFF)</span>
                     </div>
                     <div style={{ margin: '8px 0', height: '1px', background: '#30363d', opacity: 0.5 }} />
-                    {Object.entries(MINION_TYPES).map(([typeKey]) => (
+                    {Object.entries(MINION_TYPES).map(([typeKey]) => {
+                        const labelPrefix = { HUMAN: 'H', HUMANOID: 'O', DOG_ROBOT: 'D', TURTLE_BOT: 'T', DRONE: 'R' }[typeKey] ?? '';
+                        return (
                         <div key={typeKey} className="legend-item" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
                             <span className="swatch" style={{ background: config[typeKey]?.COLOR ?? '#888', width: '14px', height: '14px', borderRadius: '4px', flexShrink: 0 }}></span>
-                            <span>{typeKey.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}</span>
+                            <span><strong>{labelPrefix}</strong> — {typeKey.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}</span>
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
         </div>

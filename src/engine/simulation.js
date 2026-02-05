@@ -33,10 +33,90 @@ const segmentIntersectsRect = (x1, z1, x2, z2, cx, cz, halfSize) => {
     return p1Inside || p2Inside;
 };
 
+// For generation: find covering cell (capacity first, then coverage) - cells need not be active.
+export const getCoveringCellForPosition = (x, z, levelId, levels, config) => {
+    const level = levels?.find(l => l.id === levelId);
+    if (!level) return null;
+    const isCoveredBy = (px, pz, c) => {
+        const dx = px - c.x, dz = pz - c.z;
+        const radius = c.type === 'capacity' ? config.CAPACITY_CELL_RADIUS : config.COVERAGE_CELL_RADIUS;
+        return Math.sqrt(dx * dx + dz * dz) < radius;
+    };
+    const capacityCells = level.cells.filter(c => c.type === 'capacity');
+    const coveringCap = capacityCells.filter(c => isCoveredBy(x, z, c));
+    if (coveringCap.length > 0) {
+        coveringCap.sort((a, b) => ((x - a.x) ** 2 + (z - a.z) ** 2) - ((x - b.x) ** 2 + (z - b.z) ** 2));
+        return { cell: coveringCap[0], isCapacity: true };
+    }
+    const coverageCells = level.cells.filter(c => c.type === 'coverage');
+    const coveringCov = coverageCells.filter(c => isCoveredBy(x, z, c));
+    if (coveringCov.length > 0) {
+        coveringCov.sort((a, b) => ((x - a.x) ** 2 + (z - a.z) ** 2) - ((x - b.x) ** 2 + (z - b.z) ** 2));
+        return { cell: coveringCov[0], isCapacity: false };
+    }
+    return null;
+};
+
+// Exported for use in movement: find serving cell (active only, capacity first, then coverage).
+export const getServingCellForPosition = (x, z, levelId, levels, config) => {
+    const level = levels?.find(l => l.id === levelId);
+    if (!level) return null;
+    const isCoveredBy = (px, pz, c) => {
+        const dx = px - c.x, dz = pz - c.z;
+        const radius = c.type === 'capacity' ? config.CAPACITY_CELL_RADIUS : config.COVERAGE_CELL_RADIUS;
+        return Math.sqrt(dx * dx + dz * dz) < radius;
+    };
+    const functionalCapacity = level.cells.filter(c => c.active && c.type === 'capacity');
+    const coveringCap = functionalCapacity.filter(c => isCoveredBy(x, z, c));
+    if (coveringCap.length > 0) {
+        coveringCap.sort((a, b) => ((x - a.x) ** 2 + (z - a.z) ** 2) - ((x - b.x) ** 2 + (z - b.z) ** 2));
+        return { cell: coveringCap[0], isCapacity: true };
+    }
+    const activeCoverage = level.cells.filter(c => c.active && c.type === 'coverage');
+    const coveringCov = activeCoverage.filter(c => isCoveredBy(x, z, c));
+    if (coveringCov.length > 0) {
+        coveringCov.sort((a, b) => ((x - a.x) ** 2 + (z - a.z) ** 2) - ((x - b.x) ** 2 + (z - b.z) ** 2));
+        return { cell: coveringCov[0], isCapacity: false };
+    }
+    return null;
+};
+
+// Exported for use in generation
+export const getLoadOnCoverageCell = (cellId, minions, overrideMinion, levels, config) => {
+    let load = 0;
+    const isCoveredBy = (m, c) => {
+        const px = (overrideMinion && m.id === overrideMinion.id) ? overrideMinion.x : m.x;
+        const pz = (overrideMinion && m.id === overrideMinion.id) ? overrideMinion.z : m.z;
+        const pl = (overrideMinion && m.id === overrideMinion.id) ? overrideMinion.level : m.level;
+        if (c.level !== pl) return false;
+        const dx = px - c.x, dz = pz - c.z;
+        const radius = c.type === 'capacity' ? config.CAPACITY_CELL_RADIUS : config.COVERAGE_CELL_RADIUS;
+        return Math.sqrt(dx * dx + dz * dz) < radius;
+    };
+    for (const m of minions) {
+        const level = levels?.find(l => l.id === (overrideMinion && m.id === overrideMinion.id ? overrideMinion.level : m.level));
+        if (!level) continue;
+        const pos = overrideMinion && m.id === overrideMinion.id ? { ...m, x: overrideMinion.x, z: overrideMinion.z, level: overrideMinion.level } : m;
+        const functionalCapacity = level.cells.filter(c => c.active && c.type === 'capacity');
+        const coveringCap = functionalCapacity.filter(c => isCoveredBy(pos, c));
+        if (coveringCap.length > 0) continue;
+        const activeCoverage = level.cells.filter(c => c.active && c.type === 'coverage');
+        const coveringCov = activeCoverage.filter(c => isCoveredBy(pos, c));
+        if (coveringCov.length > 0) {
+            coveringCov.sort((a, b) => ((pos.x - a.x) ** 2 + (pos.z - a.z) ** 2) - ((pos.x - b.x) ** 2 + (pos.z - b.z) ** 2));
+            if (coveringCov[0].id === cellId) {
+                load += config[m.type.toUpperCase()]?.REQ_THROUGHPUT || 0;
+            }
+        }
+    }
+    return load;
+};
+
 // Helper for random movement within constraints
 // For each minion: generate random movement (within max), validate, retry up to 10 times.
 // If no valid move found: keep old position (minion stays put).
-export const moveMinion = (minion, config, physicalMap, activeLevels = null, logger = null) => {
+// allMinions: optional array of all minions (current positions) for overload check when target is coverage cell.
+export const moveMinion = (minion, config, physicalMap, activeLevels = null, logger = null, allMinions = null) => {
     const log = logger?.log ? (m) => logger.log(m) : (typeof remoteLog !== 'undefined' ? remoteLog : () => {});
     const { type, x, z, level } = minion;
     const maxMove = config[type.toUpperCase()]?.MAX_MOVE ?? 1;
@@ -133,41 +213,22 @@ export const moveMinion = (minion, config, physicalMap, activeLevels = null, log
 
         if (!isMoveValid) continue;
 
-        // 2. Check Coverage
-        // Allow coverage from any cell (active or inactive)
-        const levelCells = activeLevels
-            ? activeLevels.find(l => l.id === newLevel)?.cells
-            : targetLevelData?.cells;
+        // 2. Check Coverage: capacity first, then coverage (must be served by active cell)
+        const levelsToUse = activeLevels || (targetLevelData ? [{ ...targetLevelData, cells: targetLevelData.cells || [] }] : null);
+        const serving = levelsToUse ? getServingCellForPosition(newX, newZ, newLevel, levelsToUse, config) : null;
 
-        if (levelCells && levelCells.length > 0) {
-            // Use same radius as coverage evaluation so valid moves are never out of service
-            let isCovered = false;
-            let minDist = Infinity;
-            let nearestCellId = null;
-            let nearestRadius = 0;
-            for (const cell of levelCells) {
-                const dx = newX - cell.x;
-                const dz = newZ - cell.z;
-                const radius = cell.type === 'coverage' ? config.COVERAGE_CELL_RADIUS : config.CAPACITY_CELL_RADIUS;
-                const dist = Math.sqrt(dx * dx + dz * dz);
-                if (dist < minDist) {
-                    minDist = dist;
-                    nearestCellId = cell.id;
-                    nearestRadius = radius;
-                }
-                if (dist < radius) {
-                    isCovered = true;
-                    break;
-                }
-            }
-            if (!isCovered) {
-                isMoveValid = false;
-                log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: outside coverage (${newX.toFixed(1)}, ${newZ.toFixed(1)}) nearest ${nearestCellId} dist=${minDist.toFixed(2)} radius=${nearestRadius}`);
-            }
-        } else {
-            // No cells to validate against: reject move (e.g. level not found, or physicalMap has no cells)
+        if (!serving) {
             isMoveValid = false;
-            log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: no cells for level ${newLevel}`);
+            log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: no active cell covers (${newX.toFixed(1)}, ${newZ.toFixed(1)})`);
+        } else if (!serving.isCapacity) {
+            // Target is coverage cell: check overload
+            const CELL_LIMIT = config.COVERAGE_LIMIT_MBPS || 100;
+            const override = { id: minion.id, x: newX, z: newZ, level: newLevel };
+            const load = getLoadOnCoverageCell(serving.cell.id, allMinions || [minion], override, levelsToUse, config);
+            if (load > CELL_LIMIT) {
+                isMoveValid = false;
+                log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: coverage cell ${serving.cell.id} would be overloaded (${load}/${CELL_LIMIT})`);
+            }
         }
 
         if (isMoveValid) {
@@ -300,28 +361,28 @@ export const evaluateCoverage = (minions, levels, config, logger) => {
         const coveredCount = minions.length - uncoveredMinionIds.length;
         if (log.log) log.log(`[SIM] Step 1 Coverage Fail: ${coveredCount}/${minions.length} served.`);
     } else {
-        // Step 2: Check Throughput Capacity
-        // Iterate all assigned cells
+        // Step 2: Check Throughput Capacity (coverage cells only; capacity cells have unlimited throughput)
         for (const [cellId, data] of Object.entries(cellAssignments)) {
+            if (data.cell.type === 'capacity') continue; // capacity cells: unlimited, no overload
+
             const utilization = (data.totalLoad / CELL_CAPACITY_LIMIT) * 100;
             if (log.log) log.log(`[SIM] Cell ${cellId} Load: ${data.totalLoad}/${CELL_CAPACITY_LIMIT} (${utilization.toFixed(1)}%) - Minions: ${data.minions.length}`);
 
             if (data.totalLoad > CELL_CAPACITY_LIMIT) {
                 failure = `Cell ${cellId} Overloaded! Load: ${data.totalLoad} / ${CELL_CAPACITY_LIMIT}`;
 
-                // If overloaded, maybe we should suggest expanding capacity? 
-                // Or maybe this counts as "User needs to add more capacity cells" (which means turning them on).
-                // But if they are already on?
-                // The game assumes user turns on EXISTING cells.
-                // If a cell is overloaded, the user probably needs to turn on a NEARBY cell to offload traffic (if logic supported load balancing).
-                // But our assignment logic is greedy (Nearest).
-                // So user must enable a cell CLOSER to some minions to steal them?
-                // Or just enable MORE cells?
-                // For "shouldBeOn", we can suggest the overloaded cell itself (it is on), 
-                // OR we flag it as critical?
-                // Actually, if it's overloaded, it works, but fails game constraints.
-                // We should probably mark it as "shouldBeOn" to emphasize it? Or maybe neighboring cells?
-                cellsShouldBeOn.add(cellId);
+                // On overload: suggest capacity cells that should be turned on to offload traffic
+                const overloadedCell = data.cell;
+                const level = levels.find(l => l.id === overloadedCell.level);
+                if (level) {
+                    const inactiveCapacity = level.cells.filter(c => c.type === 'capacity' && !c.active);
+                    for (const minionId of data.minions) {
+                        const m = minions.find(mi => mi.id === minionId);
+                        if (!m) continue;
+                        const covering = inactiveCapacity.filter(c => isMinionCoveredByCell(m, c));
+                        covering.forEach(c => cellsShouldBeOn.add(c.id));
+                    }
+                }
                 break; // Game Over
             }
         }

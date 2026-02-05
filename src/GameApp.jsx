@@ -10,6 +10,13 @@ import { moveMinion, evaluateCoverage } from './engine/simulation';
 import { generateScenario } from './engine/generation';
 import { remoteLog } from './utils/logger';
 
+// Minion label: H0, H1 (human), O0 (humanoid), D0 (dog_robot), T0 (turtle_bot), R0 (drone)
+const MINION_LABEL_PREFIX = { human: 'H', humanoid: 'O', dog_robot: 'D', turtle_bot: 'T', drone: 'R' };
+const getMinionLabel = (minion) => {
+    const prefix = MINION_LABEL_PREFIX[minion.type] ?? minion.type.charAt(0).toUpperCase();
+    const idx = minion.id.split('_').pop();
+    return `${prefix}${idx}`;
+};
 
 const GameApp = () => {
     const { user, isGuest, isAdmin, token, login, register, logout } = useAuth();
@@ -739,7 +746,7 @@ const GameApp = () => {
         }
 
         const { minionStates, failure } = evaluateCoverage(scenarioState.minions, scenarioState.levels, config);
-        const movedMinions = minionStates.map(m => moveMinion(m, config, physicalMap, scenarioState.levels));
+        const movedMinions = minionStates.map(m => moveMinion(m, config, physicalMap, scenarioState.levels, undefined, minionStates));
 
         setScenarioState(prev => ({ ...prev, minions: movedMinions }));
         setCurrentStep(prev => prev + 1);
@@ -1074,7 +1081,7 @@ const GameApp = () => {
                                                     position={[minion.x, baseY + (layerOffsets.minion?.offset || 1.5), minion.z]}
                                                     type={minion.type}
                                                     color={minion.color}
-                                                    label={minion.type.charAt(0).toUpperCase()}
+                                                    label={getMinionLabel(minion)}
                                                     size={config[minion.type.toUpperCase()]?.SIZE || 1.0}
                                                     isUncovered={!minion.covered}
                                                     maxMove={config[minion.type.toUpperCase()]?.MAX_MOVE ?? 6}
@@ -1119,7 +1126,7 @@ const GameApp = () => {
                 }}
                 onSave={saveScenario}
                 onSaveServer={saveToServer}
-                onSaveServerAs={saveConfigOnlyToServer}
+                onSaveServerAs={saveToServerAs}
                 adminSelectedDifficulty={adminSelectedDifficulty}
                 onSelectDifficulty={loadDifficultyForAdmin}
                 onLoad={loadScenario}

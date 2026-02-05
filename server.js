@@ -747,7 +747,7 @@ app.post('/api/player/step', (req, res) => {
     // 2. Move Minions
     const simLogger = { log: (m) => writeToLogFile(m, 'info') };
     const movedMinions = scenarioState.minions.map(m =>
-        moveMinion(m, configToUse, physicalMap, newLevels, simLogger)
+        moveMinion(m, configToUse, physicalMap, newLevels, simLogger, scenarioState.minions)
     );
 
     // 3. Evaluate Coverage
