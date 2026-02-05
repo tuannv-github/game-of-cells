@@ -35,13 +35,14 @@ html,
 }
 
 .panel-container {
-    width: 350px;
-    background: var(--panel-bg);
-    border-left: 1px solid var(--border-color);
-    padding: 24px;
+    width: 360px;
+    background: linear-gradient(180deg, #1a1f28 0%, #14181f 50%, #0f1318 100%);
+    border-left: 1px solid rgba(48, 54, 61, 0.8);
+    padding: 20px;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
 }
 
 .action-bar {
@@ -112,6 +113,29 @@ html,
 input[type="range"] {
     width: 100%;
     accent-color: var(--accent-color);
+}
+
+/* Admin panel inputs */
+.panel-container input[type="number"],
+.panel-container input[type="text"] {
+    width: 100%;
+    background: rgba(13, 17, 23, 0.8);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.panel-container input[type="number"]:focus,
+.panel-container input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(0, 242, 255, 0.15);
+}
+.panel-container input[type="number"]::-webkit-inner-spin-button,
+.panel-container input[type="number"]::-webkit-outer-spin-button {
+    opacity: 0.6;
 }
 
 h1 {
@@ -196,6 +220,11 @@ h1 {
     border-radius: 4px;
     font-size: 0.8rem;
 }
+.panel-container .count-input {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 6px;
+}
 
 section h3 {
     margin: 16px 0 12px 0;
@@ -218,13 +247,37 @@ section h3 {
 
 .config-section-compact .minion-config-row {
     margin-bottom: 8px;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
 }
 
 .config-section-compact section h3.collapsible {
     cursor: pointer;
+    padding: 8px 10px;
+    margin: 0 -10px;
+    border-radius: 6px;
+    transition: background 0.2s, color 0.2s;
 }
 .config-section-compact section h3.collapsible:hover {
     color: var(--accent-color);
+    background: rgba(0, 242, 255, 0.06);
+}
+
+/* Admin section cards */
+.admin-section {
+    background: linear-gradient(145deg, rgba(26, 35, 50, 0.6) 0%, rgba(13, 17, 23, 0.9) 100%);
+    border: 1px solid rgba(48, 54, 61, 0.6);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.admin-section:hover {
+    border-color: rgba(48, 54, 61, 0.9);
+}
+.admin-section .config-group:last-child {
+    margin-bottom: 0;
 }
 
 .legend-section {

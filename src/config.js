@@ -53,13 +53,13 @@ export const DEFAULT_CONFIG = {
         minion: { offset: 3.0 }
     },
 
-    // Minion Parameters
+    // Minion Parameters (distinct colors & shapes per type)
     HUMAN: {
         ENABLED: true,
         COUNT: 5,
         MAX_MOVE: 6.0,
         REQ_THROUGHPUT: 5,
-        COLOR: '#ffffff',
+        COLOR: '#4db8ff',
         SIZE: 2.5
     },
     HUMANOID: {
@@ -67,7 +67,7 @@ export const DEFAULT_CONFIG = {
         COUNT: 3,
         MAX_MOVE: 8.0,
         REQ_THROUGHPUT: 10,
-        COLOR: '#ffcc00',
+        COLOR: '#ff9500',
         SIZE: 2.5
     },
     DOG_ROBOT: {
@@ -75,7 +75,7 @@ export const DEFAULT_CONFIG = {
         COUNT: 2,
         MAX_MOVE: 20.0,
         REQ_THROUGHPUT: 15,
-        COLOR: '#3366ff',
+        COLOR: '#5c6bc0',
         SIZE: 2.5
     },
     TURTLE_BOT: {
@@ -83,7 +83,7 @@ export const DEFAULT_CONFIG = {
         COUNT: 2,
         MAX_MOVE: 4.0,
         REQ_THROUGHPUT: 2,
-        COLOR: '#00ff66',
+        COLOR: '#00bfa5',
         SIZE: 2.5
     },
     DRONE: {
@@ -91,7 +91,7 @@ export const DEFAULT_CONFIG = {
         COUNT: 1,
         MAX_MOVE: 40.0,
         REQ_THROUGHPUT: 20,
-        COLOR: '#9933ff',
+        COLOR: '#ab47bc',
         SIZE: 2.5
     }
 };

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DIFFICULTY_PRESETS, MINION_TYPES } from '../config';
+import { DIFFICULTY_PRESETS, MINION_TYPES, DEFAULT_CONFIG } from '../config';
 import { Hexagon, Layers, Activity, Eye, EyeOff, Save, Upload, UploadCloud, DownloadCloud, X, Trash2, LogOut, Zap, ChevronDown, ChevronRight } from 'lucide-react';
 import TokenPanel from './TokenPanel';
 import { remoteLog } from '../utils/logger';
@@ -9,12 +9,12 @@ const AdminPanel = ({
     config, setConfig, onGenerate,
     onSave, onLoad, onSaveServer, onLoadServer, onDeleteServer,
     onReset, onSaveServerAs, mapList, onFetchMaps,
+    adminSelectedDifficulty, onSelectDifficulty,
     layerVisibility, setLayerVisibility,
     user, isGuest, onLogout, onShowLogin, showLoginModal, onCloseLoginModal, onLoginFromGuest, onRegisterFromGuest,
     tokenPanelProps
 }) => {
     const [showMapList, setShowMapList] = useState(false);
-    const [showSavePicker, setShowSavePicker] = useState(false);
     const [expandedSections, setExpandedSections] = useState({ global: true, geometry: true, infrastructure: false, minions: false });
 
     const toggleSection = (key) => setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -63,8 +63,8 @@ const AdminPanel = ({
         remoteLog(`[CONFIG] ${type} ${key} set to ${val}`);
     };
 
-    const sectionStyle = { background: 'linear-gradient(135deg, #1a2332 0%, #0d1117 100%)', borderRadius: '8px', padding: '12px', border: '1px solid #30363d', marginBottom: '12px' };
-    const labelStyle = { fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px', fontWeight: 600 };
+    const sectionStyle = { background: 'linear-gradient(145deg, rgba(26, 35, 50, 0.6) 0%, rgba(13, 17, 23, 0.9) 100%)', borderRadius: '10px', padding: '14px 16px', border: '1px solid rgba(48, 54, 61, 0.6)', marginBottom: '12px' };
+    const labelStyle = { fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', letterSpacing: '1.2px', marginBottom: '8px', fontWeight: 600 };
 
     return (
         <div className="panel-container">
@@ -77,9 +77,9 @@ const AdminPanel = ({
                     <LoginForm onLogin={onLoginFromGuest} onRegister={onRegisterFromGuest} hideGuestButton compact />
                 </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #30363d' }}>
-                <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.5px' }}>
-                    Game of Cells <span style={{ fontSize: '11px', color: '#ffc107', fontWeight: 500, marginLeft: '4px' }}>(Admin)</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', paddingBottom: '14px', borderBottom: '1px solid rgba(48, 54, 61, 0.6)' }}>
+                <h1 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)' }}>
+                    Game of Cells <span style={{ fontSize: '10px', color: '#ffc107', fontWeight: 600, marginLeft: '6px', padding: '2px 6px', background: 'rgba(255, 193, 7, 0.15)', borderRadius: '4px' }}>ADMIN</span>
                 </h1>
                 {(user || isGuest) && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -99,66 +99,67 @@ const AdminPanel = ({
                     </div>
                 )}
             </div>
-            <div style={{ fontSize: '11px', color: '#8b949e', marginBottom: '12px' }}>Configure scenarios for players. Click sections to expand.</div>
+            <div style={{ fontSize: '11px', color: '#8b949e', marginBottom: '14px', lineHeight: 1.5 }}>Configure scenarios for players. Click sections to expand.</div>
+
+            {/* Difficulty Selection */}
+            {onSelectDifficulty && (
+                <div style={{ ...sectionStyle, marginBottom: '14px' }}>
+                    <div style={labelStyle}>Difficulty (auto-saves)</div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        {Object.entries(DIFFICULTY_PRESETS).map(([key, { label }]) => (
+                            <button
+                                key={key}
+                                className={adminSelectedDifficulty === key ? 'btn btn-primary' : 'btn btn-outline'}
+                                onClick={() => onSelectDifficulty(key)}
+                                style={{ flex: 1, padding: '9px 10px', fontSize: '11px', borderRadius: '6px' }}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#8b949e', marginTop: '6px' }}>
+                        Editing {(adminSelectedDifficulty || 'easy')} — config auto-saves on change
+                    </div>
+                </div>
+            )}
 
             {/* Quick Actions */}
-            <div style={sectionStyle}>
+            <div style={{ ...sectionStyle, padding: '16px' }}>
                 <div style={labelStyle}>Generate</div>
                 <button className="btn btn-primary" onClick={onGenerate} title="Create new scenario with current settings"
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px 14px', borderRadius: '6px', marginBottom: '12px' }}>
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px 16px', borderRadius: '8px', marginBottom: '14px', fontSize: '12px' }}>
                     <Zap size={18} /> Generate Scenario
                 </button>
                 <div style={labelStyle}>File</div>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-                    <button className="btn btn-outline" onClick={onSave} title="Download to file" style={{ flex: 1, fontSize: '11px', padding: '8px', borderRadius: '6px' }}>
+                    <button className="btn btn-outline" onClick={onSave} title="Download to file" style={{ flex: 1, fontSize: '11px', padding: '9px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                         <Save size={14} /> Save
                     </button>
                     <input type="file" accept=".json" style={{ display: 'none' }} id="admin-scenario-upload"
                         onChange={(e) => { if (e.target.files?.[0]) { onLoad(e.target.files[0]); e.target.value = null; } }} />
-                    <button className="btn btn-outline" onClick={() => document.getElementById('admin-scenario-upload').click()} title="Load from file" style={{ flex: 1, fontSize: '11px', padding: '8px', borderRadius: '6px' }}>
+                    <button className="btn btn-outline" onClick={() => document.getElementById('admin-scenario-upload').click()} title="Load from file" style={{ flex: 1, fontSize: '11px', padding: '9px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                         <Upload size={14} /> Load
                     </button>
                 </div>
                 <div style={labelStyle}>Server</div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button className="btn btn-outline" onClick={() => setShowSavePicker(true)} title="Save to server (choose Easy/Medium/Hard)" style={{ flex: 1, minWidth: '100px', fontSize: '11px', padding: '8px', borderRadius: '6px' }}>
-                        <UploadCloud size={14} /> Server Save
+                    <button className="btn btn-outline" onClick={() => onSaveServerAs && onSaveServerAs(adminSelectedDifficulty || 'easy')} title={`Save config to ${(adminSelectedDifficulty || 'easy')}`} style={{ flex: 1, minWidth: '100px', fontSize: '11px', padding: '9px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                        <UploadCloud size={14} /> Save Config
                     </button>
-                    <button className="btn btn-outline" onClick={() => { if (!showMapList) onFetchMaps(); setShowMapList(!showMapList); }} title="Load from server" style={{ flex: 1, minWidth: '100px', fontSize: '11px', padding: '8px', borderRadius: '6px' }}>
+                    <button className="btn btn-outline" onClick={() => { if (!showMapList) onFetchMaps(); setShowMapList(!showMapList); }} title="Load from server" style={{ flex: 1, minWidth: '100px', fontSize: '11px', padding: '9px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                         <DownloadCloud size={14} /> Server Load
                     </button>
-                    <button className="btn btn-outline" onClick={onReset} title="Reset all to defaults" style={{ color: '#f85149', fontSize: '11px', padding: '8px', borderRadius: '6px' }}>
+                    <button className="btn btn-outline" onClick={onReset} title="Reset all to defaults" style={{ color: '#f85149', fontSize: '11px', padding: '9px 10px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                         <X size={14} /> Reset
                     </button>
                 </div>
             </div>
 
-            {showSavePicker && onSaveServerAs && (
-                <div className="map-list-overlay" style={{
-                    position: 'fixed', top: '100px', left: '380px', width: '300px', zIndex: 1000,
-                    background: 'linear-gradient(180deg, #1a2332 0%, #0d1117 100%)', border: '1px solid #30363d', padding: '14px', borderRadius: '8px',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid #30363d' }}>
-                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>Save as</h4>
-                        <button onClick={() => setShowSavePicker(false)} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '4px', borderRadius: '4px' }} title="Close"><X size={16} /></button>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {Object.entries(DIFFICULTY_PRESETS).map(([key, { label }]) => (
-                            <button key={key} className="btn btn-primary" onClick={() => { onSaveServerAs(key); setShowSavePicker(false); }}
-                                style={{ width: '100%', padding: '10px 14px', borderRadius: '6px' }}>
-                                {label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            )}
-
             {showMapList && (
                 <div className="map-list-overlay" style={{
                     position: 'fixed', top: '100px', left: '380px', width: '320px', zIndex: 1000,
-                    background: 'linear-gradient(180deg, #1a2332 0%, #0d1117 100%)', border: '1px solid #30363d', padding: '14px', borderRadius: '8px',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)', maxHeight: '420px', overflowY: 'auto'
+                    background: 'linear-gradient(180deg, #1a2332 0%, #0d1117 100%)', border: '1px solid rgba(48, 54, 61, 0.8)', padding: '16px', borderRadius: '12px',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(0, 242, 255, 0.05)', maxHeight: '420px', overflowY: 'auto'
                 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid #30363d' }}>
                         <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>Server Load</h4>
@@ -186,17 +187,17 @@ const AdminPanel = ({
                 </div>
             )}
 
-            <section style={sectionStyle}>
-                <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}><Layers size={16} /> Layer Visibility</h3>
+            <section className="admin-section" style={{ marginBottom: '12px' }}>
+                <h3 style={{ marginTop: 0, marginBottom: '12px', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}><Layers size={16} /> Layer Visibility</h3>
                 <div className="visibility-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     {Object.keys(layerVisibility).map(layer => (
                         <button key={layer} onClick={() => toggleLayer(layer)}
                             style={{
-                                display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 10px', fontSize: '11px',
-                                background: layerVisibility[layer] ? 'rgba(0, 242, 255, 0.12)' : '#161b22',
-                                border: `1px solid ${layerVisibility[layer] ? '#00f2ff' : '#30363d'}`,
+                                display: 'flex', alignItems: 'center', gap: '6px', padding: '9px 10px', fontSize: '11px',
+                                background: layerVisibility[layer] ? 'rgba(0, 242, 255, 0.1)' : 'rgba(22, 27, 34, 0.8)',
+                                border: `1px solid ${layerVisibility[layer] ? 'rgba(0, 242, 255, 0.4)' : 'rgba(48, 54, 61, 0.6)'}`,
                                 color: layerVisibility[layer] ? '#00f2ff' : '#8b949e',
-                                borderRadius: '6px', cursor: 'pointer', width: '100%', fontWeight: '600', textTransform: 'capitalize', transition: 'all 0.2s'
+                                borderRadius: '8px', cursor: 'pointer', width: '100%', fontWeight: '600', textTransform: 'capitalize', transition: 'all 0.2s'
                             }}>
                             {layerVisibility[layer] ? <Eye size={12} /> : <EyeOff size={12} />}
                             {layer === 'minionRange' ? 'Movement Range' :
@@ -211,119 +212,117 @@ const AdminPanel = ({
             {tokenPanelProps && <TokenPanel {...tokenPanelProps} />}
 
             <div className="config-section config-section-compact">
-                <section style={{ ...sectionStyle, marginBottom: '10px' }}>
-                    <h3 className="collapsible" style={{ marginTop: 0, marginBottom: expandedSections.global ? '10px' : 0, userSelect: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }} onClick={() => toggleSection('global')}>
+                <section className="admin-section" style={{ marginBottom: '10px' }}>
+                    <h3 className="collapsible" style={{ marginTop: 0, marginBottom: expandedSections.global ? '12px' : 0, userSelect: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }} onClick={() => toggleSection('global')}>
                         {expandedSections.global ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         <Activity size={16} /> Global
                     </h3>
                     {expandedSections.global && (
                     <div>
                     <div className="config-group">
-                        <label>Target Steps: {config.TARGET_STEPS}</label>
-                        <input type="range" min="10" max="500" step="10" value={config.TARGET_STEPS} onChange={e => handleConfigChange('TARGET_STEPS', parseInt(e.target.value))} />
+                        <label>Target Steps</label>
+                        <input type="number" step="1" value={config.TARGET_STEPS} onChange={e => handleConfigChange('TARGET_STEPS', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Total Energy: {config.TOTAL_ENERGY}</label>
-                        <input type="range" min="100" max="2000" step="50" value={config.TOTAL_ENERGY} onChange={e => handleConfigChange('TOTAL_ENERGY', parseInt(e.target.value))} />
+                        <label>Total Energy</label>
+                        <input type="number" step="1" value={config.TOTAL_ENERGY} onChange={e => handleConfigChange('TOTAL_ENERGY', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Cell Energy Cost: {config.CELL_ENERGY_COST}</label>
-                        <input type="range" min="0.1" max="5" step="0.1" value={config.CELL_ENERGY_COST} onChange={e => handleConfigChange('CELL_ENERGY_COST', parseFloat(e.target.value))} />
+                        <label>Cell Energy Cost</label>
+                        <input type="number" step="0.1" value={config.CELL_ENERGY_COST} onChange={e => handleConfigChange('CELL_ENERGY_COST', parseFloat(e.target.value) || 0)} />
                     </div>
                     </div>
                     )}
                 </section>
 
-                <section style={{ ...sectionStyle, marginBottom: '10px' }}>
-                    <h3 className="collapsible" style={{ marginTop: 0, marginBottom: expandedSections.geometry ? '10px' : 0, userSelect: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }} onClick={() => toggleSection('geometry')}>
+                <section className="admin-section" style={{ marginBottom: '10px' }}>
+                    <h3 className="collapsible" style={{ marginTop: 0, marginBottom: expandedSections.geometry ? '12px' : 0, userSelect: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }} onClick={() => toggleSection('geometry')}>
                         {expandedSections.geometry ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         <Layers size={16} /> Scenario Geometry
                     </h3>
                     {expandedSections.geometry && (
                     <div>
                     <div className="config-group">
-                        <label>Levels: {config.MAP_LEVELS}</label>
-                        <input type="range" min="1" max="5" value={config.MAP_LEVELS} onChange={e => handleConfigChange('MAP_LEVELS', parseInt(e.target.value))} />
+                        <label>Levels</label>
+                        <input type="number" step="1" value={config.MAP_LEVELS ?? DEFAULT_CONFIG.MAP_LEVELS} onChange={e => handleConfigChange('MAP_LEVELS', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Level Spacing: {config.LEVEL_DISTANCE}</label>
-                        <input type="range" min="5" max="50" step="1" value={config.LEVEL_DISTANCE} onChange={e => handleConfigChange('LEVEL_DISTANCE', parseInt(e.target.value))} />
+                        <label>Level Spacing</label>
+                        <input type="number" step="1" value={config.LEVEL_DISTANCE} onChange={e => handleConfigChange('LEVEL_DISTANCE', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Coverage Cells: {config.COVERAGE_CELLS_COUNT}</label>
-                        <input type="range" min="0" max="80" value={config.COVERAGE_CELLS_COUNT} onChange={e => handleConfigChange('COVERAGE_CELLS_COUNT', parseInt(e.target.value))} />
+                        <label>Coverage Cells</label>
+                        <input type="number" step="1" value={config.COVERAGE_CELLS_COUNT} onChange={e => handleConfigChange('COVERAGE_CELLS_COUNT', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Capacity Cells: {config.CAPACITY_CELLS_COUNT}</label>
-                        <input type="range" min="0" max="80" value={config.CAPACITY_CELLS_COUNT} onChange={e => handleConfigChange('CAPACITY_CELLS_COUNT', parseInt(e.target.value))} />
+                        <label>Capacity Cells</label>
+                        <input type="number" step="1" value={config.CAPACITY_CELLS_COUNT} onChange={e => handleConfigChange('CAPACITY_CELLS_COUNT', parseInt(e.target.value) || 0)} />
                     </div>
                     </div>
                     )}
                 </section>
 
-                <section style={{ ...sectionStyle, marginBottom: '10px' }}>
-                    <h3 className="collapsible" style={{ marginTop: 0, marginBottom: expandedSections.infrastructure ? '10px' : 0, userSelect: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }} onClick={() => toggleSection('infrastructure')}>
+                <section className="admin-section" style={{ marginBottom: '10px' }}>
+                    <h3 className="collapsible" style={{ marginTop: 0, marginBottom: expandedSections.infrastructure ? '12px' : 0, userSelect: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }} onClick={() => toggleSection('infrastructure')}>
                         {expandedSections.infrastructure ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         <Hexagon size={16} /> Infrastructure
                     </h3>
                     {expandedSections.infrastructure && (
                     <div>
                     <div className="config-group">
-                        <label>Coverage Cap (Mbps): {config.COVERAGE_LIMIT_MBPS}</label>
-                        <input type="range" min="50" max="500" step="10" value={config.COVERAGE_LIMIT_MBPS} onChange={e => handleConfigChange('COVERAGE_LIMIT_MBPS', parseInt(e.target.value))} />
+                        <label>Coverage Cap (Mbps)</label>
+                        <input type="number" step="1" value={config.COVERAGE_LIMIT_MBPS} onChange={e => handleConfigChange('COVERAGE_LIMIT_MBPS', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Coverage Radius: {config.COVERAGE_CELL_RADIUS}</label>
-                        <input type="range" min="0" max="80" step="1" value={config.COVERAGE_CELL_RADIUS} onChange={e => handleConfigChange('COVERAGE_CELL_RADIUS', parseInt(e.target.value))} />
+                        <label>Coverage Radius</label>
+                        <input type="number" step="1" value={config.COVERAGE_CELL_RADIUS} onChange={e => handleConfigChange('COVERAGE_CELL_RADIUS', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Capacity Radius: {config.CAPACITY_CELL_RADIUS}</label>
-                        <input type="range" min="0" max="80" step="1" value={config.CAPACITY_CELL_RADIUS} onChange={e => handleConfigChange('CAPACITY_CELL_RADIUS', parseInt(e.target.value))} />
+                        <label>Capacity Radius</label>
+                        <input type="number" step="1" value={config.CAPACITY_CELL_RADIUS} onChange={e => handleConfigChange('CAPACITY_CELL_RADIUS', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Portal Pairs: {config.PORTAL_PAIR_COUNT}</label>
-                        <input type="range" min="0" max="10" step="1" value={config.PORTAL_PAIR_COUNT} onChange={e => handleConfigChange('PORTAL_PAIR_COUNT', parseInt(e.target.value))} />
+                        <label>Portal Pairs</label>
+                        <input type="number" step="1" value={config.PORTAL_PAIR_COUNT} onChange={e => handleConfigChange('PORTAL_PAIR_COUNT', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Portal Area: {config.PORTAL_AREA}</label>
-                        <input type="range" min="10" max="500" step="10" value={config.PORTAL_AREA} onChange={e => handleConfigChange('PORTAL_AREA', parseInt(e.target.value))} />
+                        <label>Portal Area</label>
+                        <input type="number" step="1" value={config.PORTAL_AREA} onChange={e => handleConfigChange('PORTAL_AREA', parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="config-group">
-                        <label>Obstacle Area (%): {config.TOTAL_OBSTACLE_AREA_PER_LEVEL}</label>
-                        <input type="range" min="0" max="100" step="1" value={config.TOTAL_OBSTACLE_AREA_PER_LEVEL} onChange={e => handleConfigChange('TOTAL_OBSTACLE_AREA_PER_LEVEL', parseInt(e.target.value))} />
+                        <label>Obstacle Area (%)</label>
+                        <input type="number" step="1" value={config.TOTAL_OBSTACLE_AREA_PER_LEVEL} onChange={e => handleConfigChange('TOTAL_OBSTACLE_AREA_PER_LEVEL', parseInt(e.target.value) || 0)} />
                     </div>
                     </div>
                     )}
                 </section>
 
-                <section style={{ ...sectionStyle, marginBottom: '10px' }}>
-                    <h3 className="collapsible" style={{ marginTop: 0, marginBottom: expandedSections.minions ? '10px' : 0, userSelect: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }} onClick={() => toggleSection('minions')}>
+                <section className="admin-section" style={{ marginBottom: '10px' }}>
+                    <h3 className="collapsible" style={{ marginTop: 0, marginBottom: expandedSections.minions ? '12px' : 0, userSelect: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }} onClick={() => toggleSection('minions')}>
                         {expandedSections.minions ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         👥 Minions
                     </h3>
                     {expandedSections.minions && (
                     <div>
                     {['HUMAN', 'HUMANOID', 'DOG_ROBOT', 'TURTLE_BOT', 'DRONE'].map(type => (
-                        <div key={type} className="minion-config-row" style={{ padding: '10px', background: '#0d1117', borderRadius: '6px', border: '1px solid #30363d', marginBottom: '8px' }}>
-                            <div style={{ marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div key={type} className="minion-config-row" style={{ padding: '12px', background: 'rgba(13, 17, 23, 0.7)', borderRadius: '8px', border: '1px solid rgba(48, 54, 61, 0.5)', marginBottom: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
                                 <input type="color" value={config[type]?.COLOR || '#ffffff'} onChange={e => handleMinionParam(type, 'COLOR', e.target.value)}
                                     style={{ width: '24px', height: '24px', padding: 0, border: 'none', cursor: 'pointer', borderRadius: '4px' }} />
                                 <strong>{type.replace('_', ' ')}</strong>
                                 <input type="checkbox" checked={config[type]?.ENABLED} onChange={e => handleMinionToggle(type, e.target.checked)} />
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', fontSize: '11px' }}>
-                                <div><label style={{ color: '#8b949e' }}>Count</label>
-                                    <input type="number" className="count-input" value={config[type]?.COUNT ?? 0} min="0" style={{ width: '100%' }} onChange={e => handleMinionCount(type, e.target.value)} />
-                                </div>
-                                <div><label style={{ color: '#8b949e' }}>Size</label>
-                                    <input type="number" className="count-input" value={config[type]?.SIZE ?? 1} step="0.1" min="0.1" style={{ width: '100%' }} onChange={e => handleMinionSize(type, e.target.value)} />
-                                </div>
-                                <div><label style={{ color: '#8b949e' }}>Max Move</label>
-                                    <input type="number" className="count-input" value={config[type]?.MAX_MOVE ?? 0} step="0.5" min="0" style={{ width: '100%' }} onChange={e => handleMinionParam(type, 'MAX_MOVE', e.target.value)} />
-                                </div>
-                                <div><label style={{ color: '#8b949e' }}>Req Mbps</label>
-                                    <input type="number" className="count-input" value={config[type]?.REQ_THROUGHPUT ?? 0} min="0" style={{ width: '100%' }} onChange={e => handleMinionParam(type, 'REQ_THROUGHPUT', e.target.value)} />
-                                </div>
+                            <div className="config-group"><label>Count</label>
+                                <input type="number" className="count-input" value={config[type]?.COUNT ?? 0} onChange={e => handleMinionCount(type, e.target.value)} />
+                            </div>
+                            <div className="config-group"><label>Size</label>
+                                <input type="number" className="count-input" value={config[type]?.SIZE ?? 1} step="0.1" onChange={e => handleMinionSize(type, e.target.value)} />
+                            </div>
+                            <div className="config-group"><label>Max Move</label>
+                                <input type="number" className="count-input" value={config[type]?.MAX_MOVE ?? 0} step="0.1" onChange={e => handleMinionParam(type, 'MAX_MOVE', e.target.value)} />
+                            </div>
+                            <div className="config-group"><label>Req Mbps</label>
+                                <input type="number" className="count-input" value={config[type]?.REQ_THROUGHPUT ?? 0} onChange={e => handleMinionParam(type, 'REQ_THROUGHPUT', e.target.value)} />
                             </div>
                         </div>
                     ))}
@@ -332,8 +331,8 @@ const AdminPanel = ({
                 </section>
             </div>
 
-            <div className="legend-section" style={sectionStyle}>
-                <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '13px' }}>Legend</h3>
+            <div className="legend-section admin-section" style={{ marginTop: 'auto', paddingTop: '16px' }}>
+                <h3 style={{ marginTop: 0, marginBottom: '12px', fontSize: '13px', fontWeight: 600 }}>Legend</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <div className="legend-item" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
                         <span className="swatch" style={{ background: '#4db8ff', width: '14px', height: '14px', borderRadius: '4px', flexShrink: 0 }}></span>

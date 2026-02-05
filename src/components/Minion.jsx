@@ -134,11 +134,11 @@ const Minion = ({ position, type, color, label, size = 1.0, isUncovered = false,
             )}
             <Float speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
                 <mesh ref={meshRef}>
-                    {type === 'drone' ? (
-                        <octahedronGeometry args={[size]} />
-                    ) : (
-                        <sphereGeometry args={[size * 0.8]} />
-                    )}
+                    {type === 'humanoid' && <boxGeometry args={[size * 1.2, size * 1.2, size * 0.8]} />}
+                    {type === 'dog_robot' && <coneGeometry args={[size * 0.8, size * 1.4, 8]} />}
+                    {type === 'turtle_bot' && <cylinderGeometry args={[size * 0.9, size * 0.9, size * 0.4, 16]} />}
+                    {type === 'drone' && <octahedronGeometry args={[size]} />}
+                    {(!type || type === 'human') && <sphereGeometry args={[size * 0.8]} />}
                     <meshStandardMaterial
                         color={color}
                         emissive={color}

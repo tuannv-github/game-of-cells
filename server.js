@@ -6,7 +6,7 @@ import swaggerUi from 'swagger-ui-express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { DEFAULT_CONFIG } from './src/config.js';
+import { DEFAULT_CONFIG, GENERATION_CONFIG_KEYS } from './src/config.js';
 import { generateScenario } from './src/engine/generation.js';
 import { moveMinion, evaluateCoverage } from './src/engine/simulation.js';
 import { initDb, getDb } from './server/db.js';
@@ -375,6 +375,11 @@ app.post('/api/maps', (req, res) => {
     if (difficultyPresets.includes(filename) && user?.role === 'admin') {
         const filePath = path.join(SCENARIOS_ADMIN_DIR, filename);
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        if (data?.config) {
+            const base = filename.replace('.json', '');
+            const configPath = path.join(SCENARIOS_ADMIN_DIR, `${base}.config.json`);
+            fs.writeFileSync(configPath, JSON.stringify({ timestamp: new Date().toISOString(), config: data.config }, null, 2));
+        }
         return res.json({ success: true, filename });
     }
 
@@ -427,7 +432,8 @@ app.get('/api/maps/:name', (req, res) => {
     const name = req.params.name;
     let filePath = null;
     const presets = ['easy.json', 'medium.json', 'hard.json'];
-    if (presets.includes(name)) {
+    const configPresets = ['easy.config.json', 'medium.config.json', 'hard.config.json'];
+    if (presets.includes(name) || configPresets.includes(name)) {
         filePath = path.join(SCENARIOS_ADMIN_DIR, name);
     }
     if (!filePath && auth?.type === 'user') {
@@ -454,6 +460,87 @@ app.delete('/api/maps/:name', requireAuth, (req, res) => {
         res.json({ success: true });
     } else {
         res.status(404).send('Not found');
+    }
+});
+
+/**
+ * @openapi
+ * /api/admin/config/{difficulty}:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Save generation config for a difficulty (admin only)
+ *     description: Merges config into existing scenario file. Preserves scenarioState and physicalMap.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: difficulty
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [easy, medium, hard]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [config]
+ *             properties:
+ *               config:
+ *                 type: object
+ *                 description: Generation config (TARGET_STEPS, minions, etc.)
+ *     responses:
+ *       200:
+ *         description: Config saved
+ *       400:
+ *         description: Invalid difficulty or missing scenario
+ *       401:
+ *         description: Authentication required
+ *       403:
+ *         description: Admin only
+ */
+app.post('/api/admin/config/:difficulty', requireAdmin, (req, res) => {
+    const difficulty = req.params.difficulty;
+    const { config: configBody } = req.body || {};
+    if (!['easy', 'medium', 'hard'].includes(difficulty)) {
+        return res.status(400).json({ error: 'difficulty must be easy, medium, or hard' });
+    }
+    if (!configBody || typeof configBody !== 'object') {
+        return res.status(400).json({ error: 'config is required' });
+    }
+    const filename = `${difficulty}.json`;
+    const filePath = path.join(SCENARIOS_ADMIN_DIR, filename);
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: `No scenario for ${difficulty}. Generate and save first.` });
+    }
+    try {
+        const existing = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        const scenarioState = existing.scenarioState ?? existing.worldState;
+        const physicalMap = existing.physicalMap;
+        if (!scenarioState || !physicalMap) {
+            return res.status(400).json({ error: 'Invalid scenario file (missing scenarioState or physicalMap)' });
+        }
+        const mergedConfig = { ...existing.config };
+        for (const k of GENERATION_CONFIG_KEYS) {
+            if (configBody[k] !== undefined) mergedConfig[k] = configBody[k];
+        }
+        const updated = {
+            ...existing,
+            timestamp: new Date().toISOString(),
+            config: mergedConfig,
+            scenarioState,
+            physicalMap
+        };
+        fs.writeFileSync(filePath, JSON.stringify(updated, null, 2));
+        const configFilename = `${difficulty}.config.json`;
+        const configFilePath = path.join(SCENARIOS_ADMIN_DIR, configFilename);
+        fs.writeFileSync(configFilePath, JSON.stringify({ timestamp: new Date().toISOString(), config: mergedConfig }, null, 2));
+        writeToLogFile(`[ADMIN] Config saved to ${filename} and ${configFilename}`, 'info');
+        return res.json({ success: true, filename, configFilename });
+    } catch (err) {
+        writeToLogFile(`[ADMIN] Config save error: ${err.message}`, 'error');
+        return res.status(500).json({ error: err.message });
     }
 });
 
