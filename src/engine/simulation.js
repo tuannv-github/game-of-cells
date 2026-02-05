@@ -213,21 +213,23 @@ export const moveMinion = (minion, config, physicalMap, activeLevels = null, log
 
         if (!isMoveValid) continue;
 
-        // 2. Check Coverage: capacity first, then coverage (must be served by active cell)
+        // 2. Check Coverage: position must be within any cell's coverage (capacity first, then coverage; cell need not be active)
         const levelsToUse = activeLevels || (targetLevelData ? [{ ...targetLevelData, cells: targetLevelData.cells || [] }] : null);
-        const serving = levelsToUse ? getServingCellForPosition(newX, newZ, newLevel, levelsToUse, config) : null;
+        const covering = levelsToUse ? getCoveringCellForPosition(newX, newZ, newLevel, levelsToUse, config) : null;
 
-        if (!serving) {
+        if (!covering) {
             isMoveValid = false;
-            log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: no active cell covers (${newX.toFixed(1)}, ${newZ.toFixed(1)})`);
-        } else if (!serving.isCapacity) {
-            // Target is coverage cell: check overload
+            log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: no cell covers (${newX.toFixed(1)}, ${newZ.toFixed(1)})`);
+        } else if (covering.isCapacity) {
+            // Capacity cell: always valid (unlimited throughput when active; position check only)
+        } else if (covering.cell.active) {
+            // Coverage cell active: check overload
             const CELL_LIMIT = config.COVERAGE_LIMIT_MBPS || 100;
             const override = { id: minion.id, x: newX, z: newZ, level: newLevel };
-            const load = getLoadOnCoverageCell(serving.cell.id, allMinions || [minion], override, levelsToUse, config);
+            const load = getLoadOnCoverageCell(covering.cell.id, allMinions || [minion], override, levelsToUse, config);
             if (load > CELL_LIMIT) {
                 isMoveValid = false;
-                log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: coverage cell ${serving.cell.id} would be overloaded (${load}/${CELL_LIMIT})`);
+                log(`[SIM] moveMinion: ${minion.id} attempt ${attempt + 1} rejected: coverage cell ${covering.cell.id} would be overloaded (${load}/${CELL_LIMIT})`);
             }
         }
 
