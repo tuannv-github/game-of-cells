@@ -92,10 +92,6 @@ const Minion = React.memo(({ position, type, color, label, size = 1.0, isUncover
                     mat.color.set(blinkColor);
                     mat.emissive.set(blinkColor);
                     mat.emissiveIntensity = isRed ? 3.0 : 1.0;
-                } else if (isMoving.current) {
-                    mat.color.set(color);
-                    mat.emissive.set(color);
-                    mat.emissiveIntensity = 2.0;
                 } else {
                     mat.color.set(color);
                     mat.emissive.set(color);

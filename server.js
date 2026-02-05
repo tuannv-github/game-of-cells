@@ -744,11 +744,19 @@ app.post('/api/player/step', (req, res) => {
         }))
     }));
 
-    // 2. Move Minions
+    // 2. Move Minions (sequential: each move validation must use already-moved minions' new positions for correct overload check)
     const simLogger = { log: (m) => writeToLogFile(m, 'info') };
-    const movedMinions = scenarioState.minions.map(m =>
-        moveMinion(m, configToUse, physicalMap, newLevels, simLogger, scenarioState.minions)
-    );
+    const movedMinions = [];
+    for (let i = 0; i < scenarioState.minions.length; i++) {
+        const m = scenarioState.minions[i];
+        const allMinionsForLoad = [
+            ...movedMinions,
+            m,
+            ...scenarioState.minions.slice(i + 1)
+        ];
+        const moved = moveMinion(m, configToUse, physicalMap, newLevels, simLogger, allMinionsForLoad);
+        movedMinions.push(moved);
+    }
 
     // 3. Evaluate Coverage
     const { minionStates, energyConsumed, failure, cellsShouldBeOn, uncoveredMinions, functionalCellIds, cellLoads } = evaluateCoverage(

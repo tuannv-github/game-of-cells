@@ -66,7 +66,7 @@ const HexCell = React.memo(({ position, type, active, onClick, onToggleCell, lev
             {/* Cell Border/Outline */}
             <lineSegments rotation={[-Math.PI / 2, 0, Math.PI / 6]} position={[0, 0.03, 0]}>
                 <edgesGeometry args={[extrudeGeometry]} />
-                <lineBasicMaterial color={active ? "white" : "#ffffff"} transparent opacity={active ? 0.8 : 0.3} />
+                <lineBasicMaterial color={active ? "#000000" : "#ffffff"} transparent opacity={active ? 0.9 : 0.3} />
             </lineSegments>
 
             {/* Coverage Boundary (circle; hex cell body is illustration only) */}

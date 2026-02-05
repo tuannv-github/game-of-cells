@@ -737,8 +737,14 @@ const GameApp = () => {
             return;
         }
 
-        const { minionStates, failure, cellLoads } = evaluateCoverage(scenarioState.minions, scenarioState.levels, config);
-        const movedMinions = minionStates.map(m => moveMinion(m, config, physicalMap, scenarioState.levels, undefined, minionStates));
+        // Sequential moves: each validation must use already-moved minions' new positions for correct overload check
+        const movedMinions = [];
+        for (let i = 0; i < scenarioState.minions.length; i++) {
+            const m = scenarioState.minions[i];
+            const allMinionsForLoad = [...movedMinions, m, ...scenarioState.minions.slice(i + 1)];
+            movedMinions.push(moveMinion(m, config, physicalMap, scenarioState.levels, undefined, allMinionsForLoad));
+        }
+        const { failure, cellLoads } = evaluateCoverage(movedMinions, scenarioState.levels, config);
 
         const levelsWithLoad = scenarioState.levels.map(level => ({
             ...level,
