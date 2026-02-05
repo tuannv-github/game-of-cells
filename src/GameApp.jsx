@@ -75,28 +75,29 @@ const GameApp = () => {
         const saved = localStorage.getItem('goc_mapRadius');
         return saved ? JSON.parse(saved) : 50;
     });
+    const layerVisibilityDefaults = {
+        coverage: true,
+        capacity: true,
+        minions: true,
+        axes: true,
+        zone_HUMAN: true,
+        zone_HUMANOID: true,
+        zone_DOG_ROBOT: true,
+        zone_TURTLE_BOT: true,
+        zone_DRONE: true,
+        zone_PORTAL: true,
+        minion_HUMAN: true,
+        minion_HUMANOID: true,
+        minion_DOG_ROBOT: true,
+        minion_TURTLE_BOT: true,
+        minion_DRONE: true,
+        minionRange: true
+    };
     const [layerVisibility, setLayerVisibility] = useState(() => {
         const view = localStorage.getItem('goc_viewConfig');
-        if (view) try { const v = JSON.parse(view); if (v.layerVisibility) return v.layerVisibility; } catch (e) {}
+        if (view) try { const v = JSON.parse(view); if (v.layerVisibility) return { ...layerVisibilityDefaults, ...v.layerVisibility }; } catch (e) {}
         const saved = localStorage.getItem('goc_visibility');
-        const defaults = {
-            coverage: true,
-            capacity: true,
-            minions: true,
-            axes: true,
-            zone_HUMAN: true,
-            zone_HUMANOID: true,
-            zone_DOG_ROBOT: true,
-            zone_TURTLE_BOT: true,
-            zone_DRONE: true,
-            zone_PORTAL: true,
-            minion_HUMAN: true,
-            minion_HUMANOID: true,
-            minion_DOG_ROBOT: true,
-            minion_TURTLE_BOT: true,
-            minion_DRONE: true
-        };
-        return saved ? { ...defaults, ...JSON.parse(saved) } : defaults;
+        return saved ? { ...layerVisibilityDefaults, ...JSON.parse(saved) } : layerVisibilityDefaults;
     });
 
     const [mapList, setMapList] = useState([]);
@@ -908,6 +909,8 @@ const GameApp = () => {
                                                     label={minion.type.charAt(0).toUpperCase()}
                                                     size={config[minion.type.toUpperCase()]?.SIZE || 1.0}
                                                     isUncovered={!minion.covered}
+                                                    maxMove={config[minion.type.toUpperCase()]?.MAX_MOVE ?? 6}
+                                                    showRange={layerVisibility.minionRange}
                                                 />
                                             ))}
                                     </group>

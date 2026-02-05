@@ -199,7 +199,8 @@ const AdminPanel = ({
                                 borderRadius: '6px', cursor: 'pointer', width: '100%', fontWeight: '600', textTransform: 'capitalize', transition: 'all 0.2s'
                             }}>
                             {layerVisibility[layer] ? <Eye size={12} /> : <EyeOff size={12} />}
-                            {layer.startsWith('zone_') ? `Zone: ${layer.replace('zone_', '')}` :
+                            {layer === 'minionRange' ? 'Movement Range' :
+                                layer.startsWith('zone_') ? `Zone: ${layer.replace('zone_', '')}` :
                                 layer.startsWith('minion_') ? `Minion: ${layer.replace('minion_', '').replace('_', ' ')}` :
                                     layer.charAt(0).toUpperCase() + layer.slice(1)}
                         </button>
