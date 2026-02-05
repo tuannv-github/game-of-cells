@@ -9,6 +9,8 @@ import { fileURLToPath } from 'url';
 import { DEFAULT_CONFIG } from './src/config.js';
 import { generateWorld } from './src/engine/generation.js';
 import { moveMinion, evaluateCoverage } from './src/engine/simulation.js';
+import { initDb, getDb } from './server/db.js';
+import { login, register, createToken } from './server/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -98,6 +100,45 @@ app.get('/docs', (req, res) => {
     res.redirect('/api-docs');
 });
 
+// --- Auth ---
+app.post('/api/auth/login', (req, res) => {
+    try {
+        const { username, password } = req.body || {};
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Username and password required' });
+        }
+        const user = login(username, password);
+        if (!user) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+        const token = createToken(user);
+        res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+    } catch (err) {
+        console.error('[AUTH] Login error:', err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+app.post('/api/auth/register', (req, res) => {
+    try {
+        const { username, password } = req.body || {};
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Username and password required' });
+        }
+        if (username.length < 2 || password.length < 4) {
+            return res.status(400).json({ error: 'Username min 2 chars, password min 4 chars' });
+        }
+        const user = register(username, password);
+        if (!user) {
+            return res.status(409).json({ error: 'Username already exists' });
+        }
+        const token = createToken(user);
+        res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+    } catch (err) {
+        console.error('[AUTH] Register error:', err);
+        res.status(500).json({ error: err.message || 'Server error' });
+    }
+});
 
 /**
  * @openapi
@@ -625,7 +666,12 @@ app.post('/api/undo', (req, res) => {
     });
 });
 
-
+try {
+    initDb();
+    console.log('[DB] Database initialized');
+} catch (err) {
+    console.error('[DB] Failed to initialize:', err.message);
+}
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
     console.log(`Swagger UI available at http://localhost:${port}/api-docs`);

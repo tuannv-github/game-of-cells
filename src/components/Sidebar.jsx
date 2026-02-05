@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { Hexagon, Layers, Activity, Eye, EyeOff, Save, Upload, UploadCloud, DownloadCloud, X, Trash2, Undo } from 'lucide-react';
+import { Hexagon, Layers, Activity, Eye, EyeOff, Save, Upload, UploadCloud, DownloadCloud, X, Trash2, Undo, LogOut } from 'lucide-react';
 import { remoteLog } from '../utils/logger';
+import LoginForm from './LoginForm';
 
 const Sidebar = ({
     config, setConfig, onGenerate, onStep, onHint,
     onSave, onLoad, onSaveServer, onLoadServer, onDeleteServer,
     onReset, onRestart, onUndo, mapList, onFetchMaps, currentStep,
     layerVisibility, setLayerVisibility,
-    useBackend, setUseBackend, autoSync, onToggleAutoSync, lastApiStepResult
+    useBackend, setUseBackend, autoSync, onToggleAutoSync, lastApiStepResult,
+    user, isGuest, onLogout, onShowLogin, showLoginModal, onCloseLoginModal, onLoginFromGuest, onRegisterFromGuest
 }) => {
     const [showMapList, setShowMapList] = useState(false);
 
@@ -48,7 +50,35 @@ const Sidebar = ({
 
     return (
         <div className="panel-container">
-            <h1>Game of Cells</h1>
+            {showLoginModal && isGuest && onCloseLoginModal && (
+                <div style={{ marginBottom: '16px', padding: '12px', background: '#0d1117', border: '1px solid #30363d', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '12px', color: '#8b949e' }}>Sign in to save scores</span>
+                        <button onClick={onCloseLoginModal} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '4px' }} aria-label="Close">×</button>
+                    </div>
+                    <LoginForm onLogin={onLoginFromGuest} onRegister={onRegisterFromGuest} hideGuestButton compact />
+                </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h1 style={{ margin: 0 }}>Game of Cells</h1>
+                {(user || isGuest) && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', color: '#8b949e' }}>
+                            {isGuest ? 'Guest' : user?.username}
+                        </span>
+                        {isGuest && onShowLogin && (
+                            <button className="btn btn-outline" onClick={onShowLogin} title="Sign in to save scores" style={{ padding: '4px 8px', fontSize: '11px' }}>
+                                Sign in
+                            </button>
+                        )}
+                        {!isGuest && onLogout && (
+                            <button className="btn btn-outline" onClick={onLogout} title="Logout" style={{ padding: '4px 8px' }}>
+                                <LogOut size={14} />
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
 
             <div className="action-bar">
                 <button className="btn btn-outline" onClick={onGenerate}>
