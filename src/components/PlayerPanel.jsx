@@ -8,7 +8,7 @@ import LoginForm from './LoginForm';
 const PlayerPanel = ({
     config, onStep, onSave, onLoad, onSaveServer, onLoadServer,
     onReset, onRestart, onChangeDifficulty, onUndo, mapList, onFetchMaps, currentStep,
-    useBackend, autoSync, onToggleAutoSync,
+    useBackend, autoSync, onToggleAutoSync, stepInProgress = false,
     layerVisibility, setLayerVisibility,
     user, isGuest, onLogout, onShowLogin, showLoginModal, onCloseLoginModal, onLoginFromGuest, onRegisterFromGuest,
     tokenPanelProps
@@ -104,7 +104,7 @@ const PlayerPanel = ({
             <div style={paneStyle}>
                 <div style={labelStyle}>Play</div>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    <button className="btn btn-primary" onClick={onStep} style={{ flex: 1, minWidth: '90px', padding: '8px 12px', fontSize: '12px', borderRadius: '6px' }}>NEXT STEP</button>
+                    <button className="btn btn-primary" onClick={onStep} disabled={stepInProgress} style={{ flex: 1, minWidth: '90px', padding: '8px 12px', fontSize: '12px', borderRadius: '6px', opacity: stepInProgress ? 0.6 : 1, cursor: stepInProgress ? 'not-allowed' : 'pointer' }}>{stepInProgress ? '...' : 'NEXT STEP'}</button>
                     <button className="btn btn-primary" onClick={onRestart} style={{ flex: 1, minWidth: '70px', padding: '8px', fontSize: '12px', borderRadius: '6px', backgroundColor: '#ffc107', color: '#000' }}>RESTART</button>
                     <button className="btn btn-outline" onClick={onUndo} style={{ padding: '8px', borderRadius: '6px', borderColor: '#a855f7', color: '#a855f7' }}><Undo size={16} /></button>
                 </div>

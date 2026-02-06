@@ -105,6 +105,8 @@ const GameApp = () => {
     const orbitRef = useRef();
     const configRef = useRef(config);
     configRef.current = config;
+    const currentStepRef = useRef(currentStep);
+    currentStepRef.current = currentStep;
 
     // Persist settings to localStorage (split: generation vs viewing)
     useEffect(() => {
@@ -185,6 +187,7 @@ const GameApp = () => {
     const useBackend = !isGuest;
     const [autoSync, setAutoSync] = useState(false);
     const [lastApiStepResult, setLastApiStepResult] = useState(null);
+    const [stepInProgress, setStepInProgress] = useState(false);
 
     const getAuthHeaders = useCallback(() => {
         const authToken = token || localStorage.getItem('goc_token');
@@ -198,6 +201,12 @@ const GameApp = () => {
             const response = await fetch('/api/player/get-state', { headers: getAuthHeaders() });
             const data = await response.json();
             const state = data.scenarioState ?? data.worldState;
+            // Skip overwriting if we have newer state from a recent step (race: fetch started before step completed)
+            const fetchedStep = data.currentStep ?? 0;
+            if (fetchedStep < currentStepRef.current) {
+                remoteLog(`[API] Sync skipped: local step ${currentStepRef.current} is newer than fetched ${fetchedStep}`);
+                return;
+            }
             if (state) {
                 setScenarioState(state);
                 if (data.physicalMap) setPhysicalMap(data.physicalMap);
@@ -687,8 +696,10 @@ const GameApp = () => {
 
     const nextStep = async () => {
         if (scenarioState.levels.length === 0) return;
+        if (stepInProgress) return;
 
         if (useBackend) {
+            setStepInProgress(true);
             remoteLog('[API] Executing next step via backend...');
             try {
                 // Calculate the list of cells that are currently ON
@@ -702,6 +713,11 @@ const GameApp = () => {
                     body: JSON.stringify({ on: activeCellIds })
                 });
                 const data = await response.json();
+                if (!response.ok) {
+                    setStatus(data.msg || data.error || 'Step failed');
+                    remoteLog(`[API] Step failed: ${data.msg || data.error}`, 'error');
+                    return;
+                }
                 if (data.scenarioState) {
                     setScenarioState(data.scenarioState);
                     if (data.currentStep !== undefined) setCurrentStep(data.currentStep);
@@ -732,7 +748,10 @@ const GameApp = () => {
                     }
                 }
             } catch (err) {
+                setStatus(`Step failed: ${err.message}`);
                 remoteLog(`[ERROR] Backend step failed: ${err.message}`, 'error');
+            } finally {
+                setStepInProgress(false);
             }
             return;
         }
@@ -1157,6 +1176,7 @@ const GameApp = () => {
                 autoSync={autoSync}
                 onToggleAutoSync={handleToggleAutoSync}
                 lastApiStepResult={lastApiStepResult}
+                stepInProgress={stepInProgress}
             />
         </div>
     );

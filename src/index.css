@@ -58,6 +58,7 @@ html,
     font-weight: 600;
     cursor: pointer;
     font-size: 0.8rem;
+    user-select: none;
     transition: all 0.2s;
     text-transform: uppercase;
     letter-spacing: 0.5px;
