@@ -7,7 +7,7 @@ import Minion from './components/Minion';
 import { useAuth } from './context/AuthContext';
 import { DEFAULT_CONFIG, getGenerationConfig, DIFFICULTY_PRESETS } from './config';
 import { moveMinion, evaluateCoverage } from './engine/simulation';
-import { generateScenario } from './engine/generation';
+import { generateScenario as generateScenarioEngine } from './engine/generation';
 import { remoteLog } from './utils/logger';
 
 // Minion label: H0, H1 (human), O0 (humanoid), D0 (dog_robot), T0 (turtle_bot), R0 (drone)
@@ -102,11 +102,14 @@ const GameApp = () => {
         return (saved && ['easy', 'medium', 'hard'].includes(saved)) ? saved : 'easy';
     });
     const [configLoadKey, setConfigLoadKey] = useState(0);
+    const [scenarioKey, setScenarioKey] = useState(0);
     const orbitRef = useRef();
     const configRef = useRef(config);
     configRef.current = config;
     const currentStepRef = useRef(currentStep);
     currentStepRef.current = currentStep;
+    const lastGeneratedAtRef = useRef(0);
+    const configLoadedFromServerRef = useRef(false);
 
     // Persist settings to localStorage (split: generation vs viewing)
     useEffect(() => {
@@ -236,11 +239,15 @@ const GameApp = () => {
     // On reload (admin): load selected difficulty config + scenario from server
     useEffect(() => {
         if (!isAdmin || !adminSelectedDifficulty) return;
+        configLoadedFromServerRef.current = false;
+        const fetchStartedAt = Date.now();
         const loadAdminDifficultyOnMount = async () => {
             try {
                 const response = await fetch(`/api/maps/${adminSelectedDifficulty}.json`, { headers: getAuthHeaders() });
                 if (response.ok) {
                     const data = await response.json();
+                    // Skip overwriting if user generated a new scenario since we started this fetch (race fix)
+                    if (lastGeneratedAtRef.current > fetchStartedAt) return;
                     if (data.config && (data.scenarioState || data.world) && data.physicalMap) {
                         let configToUse = data.config;
                         const configResponse = await fetch(`/api/maps/${adminSelectedDifficulty}.config.json`, { headers: getAuthHeaders() });
@@ -258,7 +265,9 @@ const GameApp = () => {
                             }
                         }
                         if (typeof mergedConfig.MAP_LEVELS === 'string') mergedConfig.MAP_LEVELS = parseInt(mergedConfig.MAP_LEVELS, 10) || DEFAULT_CONFIG.MAP_LEVELS;
+                        if (lastGeneratedAtRef.current > fetchStartedAt) return;
                         setConfig(mergedConfig);
+                        setScenarioKey(k => k + 1);
                         setScenarioState(data.scenarioState || data.world);
                         setPhysicalMap(data.physicalMap);
                         const numCoverage = Math.max(0, (mergedConfig.COVERAGE_CELL_RADIUS || 0) > 0 ? (mergedConfig.COVERAGE_CELLS_COUNT || 0) : 0);
@@ -268,6 +277,7 @@ const GameApp = () => {
                         setTotalEnergyConsumed(data.totalEnergyConsumed ?? 0);
                         setStatus(`Loaded ${adminSelectedDifficulty} on reload`);
                         setConfigLoadKey(k => k + 1);
+                        configLoadedFromServerRef.current = true;
                     }
                 }
             } catch (err) {
@@ -380,6 +390,8 @@ const GameApp = () => {
                 }
                 const state = data.scenarioState ?? data.worldState;
                 if (state) {
+                    lastGeneratedAtRef.current = Date.now();
+                    setScenarioKey(k => k + 1);
                     setScenarioState(state);
                     setPhysicalMap(data.physicalMap);
                     setMapRadius(data.mapRadius);
@@ -401,13 +413,15 @@ const GameApp = () => {
             error: (msg) => remoteLog(msg, 'error')
         };
 
-        const { scenarioState: newScenarioState, physicalMap: newPhysicalMap, mapRadius: newRadius } = generateScenario(
+        const { scenarioState: newScenarioState, physicalMap: newPhysicalMap, mapRadius: newRadius } = generateScenarioEngine(
             configRef.current,
             physicalMap,
             resetMap,
             logger
         );
 
+        lastGeneratedAtRef.current = Date.now();
+        setScenarioKey(k => k + 1);
         setMapRadius(newRadius);
         setPhysicalMap(newPhysicalMap);
         setScenarioState(newScenarioState);
@@ -567,10 +581,12 @@ const GameApp = () => {
 
     const loadDifficultyForAdmin = useCallback(async (difficulty) => {
         setAdminSelectedDifficulty(difficulty);
+        const fetchStartedAt = Date.now();
         try {
             const response = await fetch(`/api/maps/${difficulty}.json`, { headers: getAuthHeaders() });
             if (response.ok) {
                 const data = await response.json();
+                if (lastGeneratedAtRef.current > fetchStartedAt) return;
                 if (data.config && (data.scenarioState || data.world) && data.physicalMap) {
                     let configToUse = data.config;
                     const configResponse = await fetch(`/api/maps/${difficulty}.config.json`, { headers: getAuthHeaders() });
@@ -588,7 +604,9 @@ const GameApp = () => {
                         }
                     }
                     if (typeof mergedConfig.MAP_LEVELS === 'string') mergedConfig.MAP_LEVELS = parseInt(mergedConfig.MAP_LEVELS, 10) || DEFAULT_CONFIG.MAP_LEVELS;
+                    if (lastGeneratedAtRef.current > fetchStartedAt) return;
                     setConfig(mergedConfig);
+                    setScenarioKey(k => k + 1);
                     setScenarioState(data.scenarioState || data.world);
                     setPhysicalMap(data.physicalMap);
                     const numCoverage = Math.max(0, (mergedConfig.COVERAGE_CELL_RADIUS || 0) > 0 ? (mergedConfig.COVERAGE_CELLS_COUNT || 0) : 0);
@@ -599,52 +617,14 @@ const GameApp = () => {
                     setStatus(`Loaded ${difficulty}`);
                     setConfigLoadKey(k => k + 1);
                 } else {
-                    const preset = DIFFICULTY_PRESETS[difficulty];
-                    if (preset?.config) {
-                        const merged = { ...DEFAULT_CONFIG };
-                        for (const k in preset.config) {
-                            if (typeof preset.config[k] === 'object' && preset.config[k] !== null && !Array.isArray(preset.config[k])) {
-                                merged[k] = { ...merged[k], ...preset.config[k] };
-                            } else {
-                                merged[k] = preset.config[k];
-                            }
-                        }
-                        setConfig(merged);
-                        setStatus(`No scenario for ${difficulty} — using preset config`);
-                        setConfigLoadKey(k => k + 1);
-                    }
+                    setStatus(`No scenario for ${difficulty} — using current config. Generate to create.`);
                 }
             } else {
-                const preset = DIFFICULTY_PRESETS[difficulty];
-                if (preset?.config) {
-                    const merged = { ...DEFAULT_CONFIG };
-                    for (const k in preset.config) {
-                        if (typeof preset.config[k] === 'object' && preset.config[k] !== null && !Array.isArray(preset.config[k])) {
-                            merged[k] = { ...merged[k], ...preset.config[k] };
-                        } else {
-                            merged[k] = preset.config[k];
-                        }
-                    }
-                    setConfig(merged);
-                    setStatus(`No scenario for ${difficulty} — using preset. Generate to create.`);
-                    setConfigLoadKey(k => k + 1);
-                }
+                setStatus(`No scenario for ${difficulty} — using current config. Generate to create.`);
             }
         } catch (err) {
             remoteLog(`[ERROR] Load difficulty failed: ${err.message}`);
-            const preset = DIFFICULTY_PRESETS[difficulty];
-            if (preset?.config) {
-                const merged = { ...DEFAULT_CONFIG };
-                for (const k in preset.config) {
-                    if (typeof preset.config[k] === 'object' && preset.config[k] !== null && !Array.isArray(preset.config[k])) {
-                        merged[k] = { ...merged[k], ...preset.config[k] };
-                    } else {
-                        merged[k] = preset.config[k];
-                    }
-                }
-                setConfig(merged);
-                setConfigLoadKey(k => k + 1);
-            }
+            setStatus(`Load failed — keeping current config`);
         }
     }, [getAuthHeaders]);
 
@@ -670,9 +650,10 @@ const GameApp = () => {
     }, [config, getAuthHeaders]);
 
     // Auto-save generation config on change (debounced 5s)
+    // Only after config has been loaded from server (prevents overwriting with stale local config on first load)
     const genConfigStr = JSON.stringify(getGenerationConfig(config));
     useEffect(() => {
-        if (!isAdmin || !adminSelectedDifficulty) return;
+        if (!isAdmin || !adminSelectedDifficulty || !configLoadedFromServerRef.current) return;
         const t = setTimeout(() => {
             saveConfigOnlyToServer(adminSelectedDifficulty);
         }, 5000);
@@ -930,7 +911,7 @@ const GameApp = () => {
                         </group>
                     )}
 
-                    <group>
+                    <group key={scenarioKey}>
                         {scenarioState.levels.map((level, lIndex) => {
                             const baseY = lIndex * config.LEVEL_DISTANCE;
 

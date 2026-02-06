@@ -134,11 +134,13 @@ const PlayerPanel = ({
                         <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>Server Load</h4>
                         <button onClick={() => setShowMapList(false)} style={closeBtn}><X size={16} /></button>
                     </div>
-                    {mapList.length === 0 ? (
+                    {(() => {
+                        const filtered = mapList.filter(m => m !== 'initial.json' && !/^step_\d+\.json$/.test(m));
+                        return filtered.length === 0 ? (
                         <div style={{ color: '#8b949e', fontSize: '12px', padding: '12px', textAlign: 'center' }}>No maps on server.</div>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            {mapList.map(mapName => (
+                            {filtered.map(mapName => (
                                 <button key={mapName} onClick={() => { onLoadServer(mapName); setShowMapList(false); }}
                                     className="btn btn-outline"
                                     style={{ textAlign: 'left', padding: '10px 12px', borderRadius: '6px', fontSize: '12px' }}>
@@ -146,7 +148,8 @@ const PlayerPanel = ({
                                 </button>
                             ))}
                         </div>
-                    )}
+                    );
+                    })()}
                 </div>
             )}
 
