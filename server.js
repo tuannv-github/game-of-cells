@@ -849,11 +849,12 @@ app.post('/api/player/step', (req, res) => {
     });
 
     // 4. Calculate cumulative energy (guard against NaN from corrupted state or missing config)
-    const safeTotal = loadedTotalEnergy;
-    const safeConsumed = Number(energyConsumed) || 0;
-    const newTotalEnergyConsumed = safeTotal + safeConsumed;
+    // Round to 2 decimals to avoid float accumulation (e.g. 29.99999999999999)
+    const safeTotal = Math.round((Number(loadedTotalEnergy) || 0) * 100) / 100;
+    const safeConsumed = Math.round((Number(energyConsumed) || 0) * 100) / 100;
+    const newTotalEnergyConsumed = Math.round((safeTotal + safeConsumed) * 100) / 100;
     const totalEnergy = Number(configToUse?.TOTAL_ENERGY) || DEFAULT_CONFIG.TOTAL_ENERGY;
-    let energyLeft = totalEnergy - newTotalEnergyConsumed;
+    let energyLeft = Math.round((totalEnergy - newTotalEnergyConsumed) * 100) / 100;
     if (!Number.isFinite(energyLeft)) energyLeft = 0;
 
     // Determine message and failure state
@@ -901,8 +902,8 @@ app.post('/api/player/step', (req, res) => {
         lastGameOverMsg = msg;
     }
 
-    // Include energy info always: this step, cumulative so far, and remaining
-    responseData.energyConsumed = Number(energyConsumed) || 0;
+    // Include energy info always: this step, cumulative so far, and remaining (rounded to avoid float artifacts)
+    responseData.energyConsumed = safeConsumed;
     responseData.totalEnergyConsumed = newTotalEnergyConsumed;
     responseData.energyLeft = energyLeft;
 

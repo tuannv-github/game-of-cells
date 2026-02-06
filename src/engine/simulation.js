@@ -256,12 +256,15 @@ export const evaluateCoverage = (minions, levels, config, logger) => {
 
     // 1. Calculate Energy & Identify Functional (Backhauled) Capacity Cells
     // Count active cells for energy cost (guard against NaN from missing config)
+    // Use count * energyPerCell to avoid floating-point accumulation (e.g. 30*1 vs 1+1+...+1 => 29.999...)
     const energyPerCell = Number(config.CELL_ENERGY_COST) || 1;
+    let activeCellCount = 0;
     levels.forEach(l => {
         l.cells.forEach(c => {
-            if (c.active) energyConsumed += energyPerCell;
+            if (c.active) activeCellCount++;
         });
     });
+    energyConsumed = Math.round(activeCellCount * energyPerCell * 100) / 100;
 
     // Identify functional capacity cells (All Active Cells)
     const functionalCapacityCells = [];
